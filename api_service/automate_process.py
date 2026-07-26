@@ -6,6 +6,7 @@ from api_service.services.jellyfin.jellyfin_client import JellyfinClient
 from api_service.services.seer.seer_client import SeerClient
 from api_service.services.omdb.omdb_client import OmdbClient
 from api_service.services.plex.plex_client import PlexClient
+from api_service.services.secondary_library import load_secondary_library_sets
 from api_service.services.tmdb.tmdb_client import TMDbClient
 from api_service.services.trakt.media_user_augmentor import MediaUserTraktAugmentor
 
@@ -153,6 +154,9 @@ class ContentAutomation:
         # Build Trakt augmentor (no-op if app credentials are not configured)
         trakt_augmentor = MediaUserTraktAugmentor.from_env(env_vars, instance.max_content)
 
+        # Optional secondary media server: only widens the already-owned skip set
+        secondary_content_sets = await load_secondary_library_sets(env_vars, instance.max_content)
+
         # Initialize media service handler (Jellyfin or Plex)
         if instance.selected_service in ('jellyfin', 'emby'):
             instance.logger.info(f"Initializing {instance.selected_service.upper()} client")
@@ -184,6 +188,7 @@ class ContentAutomation:
                 request_delay=request_delay,
                 trakt_augmentor=trakt_augmentor,
                 max_content=instance.max_content,
+                secondary_content_sets=secondary_content_sets,
             )
             instance.logger.info(f"{instance.selected_service.upper()} client initialized successfully")
 
@@ -218,6 +223,7 @@ class ContentAutomation:
                 trakt_augmentor=trakt_augmentor,
                 selected_users=instance.selected_users,
                 max_content=instance.max_content,
+                secondary_content_sets=secondary_content_sets,
             )
             instance.logger.info("Plex client initialized successfully")
 

@@ -237,10 +237,26 @@ class TraktRecommendationsAutomation:
             return set()
 
     async def _load_existing_content(self) -> Dict[str, set[str]]:
-        """Load existing Plex/Jellyfin TMDB IDs for downloaded-content checks."""
+        """Load existing Plex/Jellyfin TMDB IDs for downloaded-content checks.
+
+        Includes the optional secondary media server's library, so content
+        available on either server is treated as already owned.
+        """
         provider = str(self.env_vars.get("SELECTED_SERVICE") or "").lower()
         max_content = int(self.env_vars.get("MAX_CONTENT_CHECK") or self.env_vars.get("MAX_CONTENT") or 10)
 
+        primary = await self._load_primary_existing_content(provider, max_content)
+
+        from api_service.services.secondary_library import load_secondary_library_sets
+
+        secondary = await load_secondary_library_sets(self.env_vars, max_content)
+        for media_type, ids in secondary.items():
+            primary.setdefault(media_type, set()).update(ids)
+
+        return primary
+
+    async def _load_primary_existing_content(self, provider: str, max_content: int) -> Dict[str, set[str]]:
+        """Load the primary media server's library as TMDB ID sets."""
         if provider in ("jellyfin", "emby"):
             from api_service.services.jellyfin.jellyfin_client import JellyfinClient
 

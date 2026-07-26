@@ -80,6 +80,7 @@ def _parse_json_fields(config_data):
         'SELECTED_USERS',
         'JELLYFIN_LIBRARIES',
         'PLEX_LIBRARIES',
+        'SECONDARY_LIBRARIES',
         'FILTER_LANGUAGE',
         'FILTER_GENRES_EXCLUDE',
         'FILTER_STREAMING_SERVICES',
@@ -176,6 +177,12 @@ def get_default_values():
         'PLEX_CLIENT_ID': lambda: str(uuid.uuid4()),
         'PLEX_LIBRARIES': lambda: [],
         'SELECTED_SERVICE': lambda: '',
+        # Optional secondary media server, used only to widen the
+        # "already owned" set so nothing present on it gets requested.
+        'SECONDARY_SERVICE': lambda: '',
+        'SECONDARY_API_URL': lambda: '',
+        'SECONDARY_TOKEN': lambda: '',
+        'SECONDARY_LIBRARIES': lambda: [],
         'FILTER_TMDB_THRESHOLD': lambda: None,
         'FILTER_TMDB_MIN_VOTES': lambda: None,
         'FILTER_GENRES_EXCLUDE': lambda: [],
@@ -333,6 +340,7 @@ def get_config_sections():
     return {
         'services': ['TMDB_API_KEY', 'OMDB_API_KEY', 'SELECTED_SERVICE', 'PLEX_TOKEN', 'PLEX_API_URL', 'PLEX_CLIENT_ID',
                     'PLEX_LIBRARIES', 'JELLYFIN_API_URL', 'JELLYFIN_TOKEN', 'JELLYFIN_LIBRARIES',
+                    'SECONDARY_SERVICE', 'SECONDARY_API_URL', 'SECONDARY_TOKEN', 'SECONDARY_LIBRARIES',
                     'SEER_API_URL', 'SEER_TOKEN', 'SEER_USER_NAME', 'SEER_USER_PSW',
                     'SEER_SESSION_TOKEN', 'SEER_ANIME_PROFILE_CONFIG', 'SEER_REQUEST_DELAY',
                     'TRAKT_CLIENT_ID', 'TRAKT_CLIENT_SECRET', 'TRAKT_ACCESS_TOKEN',
