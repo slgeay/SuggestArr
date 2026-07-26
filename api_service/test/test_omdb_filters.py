@@ -5,6 +5,8 @@ Covers:
 - OmdbClient.get_rating(): HTTP success/failure, N/A values, parsing errors
 - TMDbClient._apply_imdb_filter(): rating threshold, vote count, None data,
   include_no_ratings flag
+- TMDbClient._fetch_recommendations() in dry-run mode: the IMDB tri-state
+  'passed' must not exclude items that a real run would request
 """
 
 import unittest
@@ -24,6 +26,7 @@ def _make_tmdb_client(
     imdb_threshold=60,
     imdb_min_votes=100,
     include_no_ratings=False,
+    omdb_client=None,
 ):
     """Return a TMDbClient with minimal required args for filter testing."""
     client = TMDbClient(
@@ -40,11 +43,18 @@ def _make_tmdb_client(
         rating_source=rating_source,
         imdb_threshold=imdb_threshold,
         imdb_min_votes=imdb_min_votes,
-        omdb_client=None,
+        omdb_client=omdb_client,
     )
     client.logger = logging.getLogger('TMDbClient')
     client.logger.setLevel(logging.DEBUG)
     return client
+
+
+def _make_omdb_stub(rating_payload):
+    """Return an OmdbClient double whose get_rating() yields a fixed payload."""
+    stub = MagicMock()
+    stub.get_rating = AsyncMock(return_value=rating_payload)
+    return stub
 
 
 MOVIE_ITEM = {'title': 'Inception', 'id': 27205}
@@ -324,6 +334,95 @@ class TestApplyImdbFilter(unittest.TestCase):
         imdb_data = {'imdb_rating': 7.5}
         result = client._apply_imdb_filter(imdb_data, MOVIE_ITEM, 'movie')
         self.assertTrue(result)
+
+
+# ---------------------------------------------------------------------------
+# TMDbClient._fetch_recommendations() — dry-run IMDB results
+# ---------------------------------------------------------------------------
+
+class TestDryRunImdbFilterResults(unittest.IsolatedAsyncioTestCase):
+    """The dry-run preview must agree with what a real run would request.
+
+    _get_imdb_filter_result() reports a tri-state 'passed': None means OMDb had
+    no usable data but include_no_ratings permits the item, which must never be
+    treated like a definite False. OMDb returns None for every lookup when the
+    API key is invalid or the daily quota is exhausted, so conflating the two
+    filters out an entire preview.
+    """
+
+    async def _dry_run_filter_results(self, client):
+        """Run a single movie through _fetch_recommendations in dry-run mode."""
+        item = dict(MOVIE_ITEM)
+        page_data = AsyncMock(return_value={'results': [item]})
+        details = AsyncMock(return_value={'runtime': 148, 'imdb_id': 'tt1375666'})
+
+        with patch.object(client, '_fetch_page_data', page_data), \
+             patch.object(client, '_get_item_details', details):
+            results = await client._fetch_recommendations(item['id'], 'movie', dry_run=True)
+
+        self.assertEqual(len(results), 1)
+        return results[0]['filter_results']
+
+    async def test_missing_omdb_data_does_not_exclude_when_ratings_optional(self):
+        client = _make_tmdb_client(
+            include_no_ratings=True,
+            omdb_client=_make_omdb_stub(None),
+        )
+
+        filter_results = await self._dry_run_filter_results(client)
+
+        self.assertIsNone(filter_results['imdb_rating']['passed'])
+        self.assertTrue(filter_results['passed'])
+
+    async def test_missing_omdb_rating_does_not_exclude_when_ratings_optional(self):
+        client = _make_tmdb_client(
+            include_no_ratings=True,
+            omdb_client=_make_omdb_stub(
+                {'imdb_rating': None, 'imdb_votes': 125, 'imdb_rating_raw': 'N/A'}
+            ),
+        )
+
+        filter_results = await self._dry_run_filter_results(client)
+
+        self.assertIsNone(filter_results['imdb_rating']['passed'])
+        self.assertTrue(filter_results['passed'])
+
+    async def test_missing_omdb_data_excludes_when_ratings_required(self):
+        client = _make_tmdb_client(
+            include_no_ratings=False,
+            omdb_client=_make_omdb_stub(None),
+        )
+
+        filter_results = await self._dry_run_filter_results(client)
+
+        self.assertFalse(filter_results['imdb_rating']['passed'])
+        self.assertFalse(filter_results['passed'])
+
+    async def test_rating_below_threshold_still_excludes(self):
+        client = _make_tmdb_client(
+            include_no_ratings=True,
+            imdb_threshold=60,
+            omdb_client=_make_omdb_stub({'imdb_rating': 4.2, 'imdb_votes': 5000}),
+        )
+
+        filter_results = await self._dry_run_filter_results(client)
+
+        self.assertFalse(filter_results['imdb_rating']['passed'])
+        self.assertFalse(filter_results['passed'])
+
+    async def test_dry_run_matches_apply_imdb_filter_for_missing_data(self):
+        """Dry-run and real-run paths must reach the same verdict."""
+        for include_no_ratings in (True, False):
+            with self.subTest(include_no_ratings=include_no_ratings):
+                client = _make_tmdb_client(
+                    include_no_ratings=include_no_ratings,
+                    omdb_client=_make_omdb_stub(None),
+                )
+
+                filter_results = await self._dry_run_filter_results(client)
+                real_run_passed = client._apply_imdb_filter(None, MOVIE_ITEM, 'movie')
+
+                self.assertEqual(bool(filter_results['passed']), real_run_passed)
 
 
 if __name__ == '__main__':
