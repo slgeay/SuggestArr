@@ -26,6 +26,26 @@ def _load_seer_config():
     )
 
 
+@seer_bp.route('/web-url', methods=['GET'])
+def get_seer_web_url():
+    """
+    Return the configured Seer base URL so the UI can build deep links.
+
+    Available to any authenticated user (the full config endpoint is
+    admin-only), and exposes no credentials.
+
+    Returns:
+        JSON with 'url' — the Seer base URL without a trailing slash, or an
+        empty string when Seer is not configured.
+    """
+    try:
+        api_url, _api_key, _session_token = _load_seer_config()
+        return jsonify({'url': (api_url or '').rstrip('/')}), 200
+    except Exception as e:
+        logger.error(f'Error loading Seer web URL: {str(e)}', exc_info=True)
+        return jsonify({'message': 'Error loading Seer URL', 'type': 'error'}), 500
+
+
 @seer_bp.route('/get_users', methods=['GET', 'POST'])
 async def get_users():
     """

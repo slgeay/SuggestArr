@@ -144,7 +144,16 @@
             <div class="modal-details-section">
               <h2 class="modal-title">{{ selectedRequest.title }}</h2>
               <div class="badge-container"><span class="badge badge-media"><i :class="selectedRequest.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i> {{ selectedRequest.media_type?.toUpperCase() }}</span><span class="badge badge-rating"><i class="fas fa-star"></i> {{ selectedRequest.rating || 'N/A' }}</span><span v-if="selectedRequest.release_date" class="badge badge-date"><i class="fas fa-calendar"></i> {{ selectedRequest.release_date }}</span></div>
-              <div v-if="selectedRequest.source_title" class="source-link-modal"><i class="fas fa-link"></i><span>Requested from: <strong>{{ selectedRequest.source_title }}</strong></span></div>
+              <div v-if="modalTmdbUrl || modalSeerrUrl" class="modal-external-links">
+                <a v-if="modalTmdbUrl" :href="modalTmdbUrl" target="_blank" rel="noopener noreferrer" class="modal-external-link"><i class="fas fa-database"></i><span>TMDb</span></a>
+                <a v-if="modalSeerrUrl" :href="modalSeerrUrl" target="_blank" rel="noopener noreferrer" class="modal-external-link"><i class="fas fa-paper-plane"></i><span>Seerr</span></a>
+              </div>
+              <div v-if="selectedRequest.source_title && modalSourcePoster" class="modal-source-card">
+                <img :src="modalSourcePoster" :alt="selectedRequest.source_title" class="modal-source-poster" />
+                <div class="modal-source-info"><span class="modal-source-label">Similar to</span><strong class="modal-source-title">{{ selectedRequest.source_title }}</strong></div>
+              </div>
+              <div v-else-if="selectedRequest.source_title" class="source-link-modal"><i class="fas fa-link"></i><span>Similar to: <strong>{{ selectedRequest.source_title }}</strong></span></div>
+              <div v-if="selectedRequest.job_name" class="source-link-modal"><i class="fas fa-briefcase"></i><span>Job: <strong>{{ selectedRequest.job_name }}</strong></span></div>
               <div v-if="selectedRequest.user_name || selectedRequest.user_id" class="source-link-modal"><i class="fas fa-user"></i><span>Requested for: <strong>{{ selectedRequest.user_name || selectedRequest.user_id }}</strong></span></div>
               <div class="modal-separator"></div>
               <div class="modal-section"><h3 class="modal-section-title"><i class="fas fa-align-left"></i> Overview</h3><p class="modal-overview">{{ selectedRequest.overview || 'No overview available.' }}</p></div>
@@ -159,6 +168,7 @@
 <script>
 import axios from 'axios';
 import { formatDate } from '@/utils/dateUtils.js';
+import { resolveTmdbId, tmdbUrl, seerrUrl, posterUrl } from '@/utils/mediaLinks.js';
 import '@/assets/styles/requestsPage.css';
 
 export default {
@@ -178,6 +188,7 @@ export default {
       actionLoadingId: null,
       approvalEnabled: false,
       selectedRequest: null,
+      seerBaseUrl: '',
       totalRequests: 0,
       loading: false,
       activeFilter: 'all',
@@ -195,15 +206,37 @@ export default {
         return requests.slice(0, 20);
       }
       return requests.filter(req => req.media_type === this.activeFilter).slice(0, 20);
+    },
+
+    modalTmdbUrl() {
+      return tmdbUrl(this.selectedRequest?.media_type, resolveTmdbId(this.selectedRequest));
+    },
+
+    modalSeerrUrl() {
+      return seerrUrl(this.seerBaseUrl, this.selectedRequest?.media_type, resolveTmdbId(this.selectedRequest));
+    },
+
+    modalSourcePoster() {
+      return posterUrl(this.selectedRequest?.source_poster_path);
     }
   },
   mounted() {
     this.loadStats();
     this.loadRecentRequests();
     this.loadApprovalState();
+    this.loadSeerBaseUrl();
   },
   methods: {
     formatDate,
+
+    async loadSeerBaseUrl() {
+      try {
+        const { data } = await axios.get('/api/seer/web-url');
+        this.seerBaseUrl = data.url || '';
+      } catch (error) {
+        console.error('Error loading Seer URL:', error);
+      }
+    },
 
     async loadStats() {
       try {
@@ -228,7 +261,8 @@ export default {
         const allRequests = response.data.data.flatMap(source =>
           source.requests.map(req => ({
             ...req,
-            source_title: source.source_title
+            source_title: source.source_title,
+            source_poster_path: source.source_poster_path
           }))
         );
 
@@ -250,7 +284,7 @@ export default {
     async loadPendingRequests() {
       try {
         const { data } = await axios.get('/api/automation/requests/workflow', { params: { status: 'awaiting_approval', page: 1, per_page: 20 } });
-        this.pendingRequests = (data.items || []).map(item => ({ ...item, _pending: true, _key: `pending-${item.id}`, requested_at: item.created_at, source_title: item.name, poster_path: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null }));
+        this.pendingRequests = (data.items || []).map(item => ({ ...item, _pending: true, _key: `pending-${item.id}`, requested_at: item.created_at, job_name: item.name, poster_path: posterUrl(item.poster_path, 'w500') }));
         this.pendingTotal = data.total || 0;
       } catch (error) {
         console.error('Error loading pending requests:', error);

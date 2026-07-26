@@ -465,10 +465,48 @@
                   </span>
                 </div>
 
-                <!-- Source Link (for requests view) -->
-                <div v-if="selectedSource.source_title" class="source-link-modal">
+                <!-- External Links -->
+                <div v-if="modalTmdbUrl || modalSeerrUrl" class="modal-external-links">
+                  <a
+                    v-if="modalTmdbUrl"
+                    :href="modalTmdbUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="modal-external-link">
+                    <i class="fas fa-database"></i>
+                    <span>TMDb</span>
+                  </a>
+                  <a
+                    v-if="modalSeerrUrl"
+                    :href="modalSeerrUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="modal-external-link">
+                    <i class="fas fa-paper-plane"></i>
+                    <span>Seerr</span>
+                  </a>
+                </div>
+
+                <!-- Source ("similar to" watched item, for requests view) -->
+                <div v-if="selectedSource.source_title && modalSourcePoster" class="modal-source-card">
+                  <img
+                    :src="modalSourcePoster"
+                    :alt="selectedSource.source_title"
+                    class="modal-source-poster" />
+                  <div class="modal-source-info">
+                    <span class="modal-source-label">Similar to</span>
+                    <strong class="modal-source-title">{{ selectedSource.source_title }}</strong>
+                  </div>
+                </div>
+                <div v-else-if="selectedSource.source_title" class="source-link-modal">
                   <i class="fas fa-link"></i>
-                  <span>Requested from: <strong>{{ selectedSource.source_title }}</strong></span>
+                  <span>Similar to: <strong>{{ selectedSource.source_title }}</strong></span>
+                </div>
+
+                <!-- Originating Job -->
+                <div v-if="selectedSource.job_name" class="source-link-modal">
+                  <i class="fas fa-briefcase"></i>
+                  <span>Job: <strong>{{ selectedSource.job_name }}</strong></span>
                 </div>
 
                 <!-- Requested For (user) -->
@@ -545,6 +583,7 @@ import Footer from './AppFooter.vue';
 import BaseDropdown from '@/components/common/BaseDropdown.vue';
 import { formatDate } from '@/utils/dateUtils.js';
 import { getRequestSourceVisual } from '@/utils/jobTypeVisuals.js';
+import { resolveTmdbId, tmdbUrl, seerrUrl, posterUrl } from '@/utils/mediaLinks.js';
 import { getAiSearchRequests } from '@/api/api.js';
 import RequestWorkflowPanel from './RequestWorkflowPanel.vue';
 
@@ -581,6 +620,7 @@ export default {
       requestUsers: [],
       showModal: false,
       selectedSource: null,
+      seerBaseUrl: '',
       loading: false,
       currentPage: 1,
       totalPages: 1,
@@ -624,6 +664,18 @@ export default {
     };
   },
   computed: {
+    modalTmdbUrl() {
+      return tmdbUrl(this.selectedSource?.media_type, resolveTmdbId(this.selectedSource));
+    },
+
+    modalSeerrUrl() {
+      return seerrUrl(this.seerBaseUrl, this.selectedSource?.media_type, resolveTmdbId(this.selectedSource));
+    },
+
+    modalSourcePoster() {
+      return posterUrl(this.selectedSource?.source_poster_path);
+    },
+
     activeFilterCount() {
       return Number(this.sortBy !== 'date-desc') + Number(this.mediaTypeFilter !== 'all') + Number(this.requestUserFilter !== 'all') + Number(this.requestStatusFilter !== 'all') + Number(this.workflowBulkMode);
     },
@@ -653,6 +705,7 @@ export default {
           source_title: source.title,
           source_id: source.id,
           source_poster: source.poster_path,
+          source_poster_path: source.poster_path,
           source_backdrop: source.backdrop_path,
           source_logo: source.logo_path,
         }))
@@ -783,6 +836,15 @@ export default {
         this.workflowTotal = workflow.data.total || 0;
       } catch (error) {
         console.error('Error loading approval jobs:', error);
+      }
+    },
+
+    async loadSeerBaseUrl() {
+      try {
+        const { data } = await axios.get('/api/seer/web-url');
+        this.seerBaseUrl = data.url || '';
+      } catch (error) {
+        console.error('Error loading Seer URL:', error);
       }
     },
 
@@ -1032,9 +1094,9 @@ export default {
     openWorkflowModal(item) {
       this.openModal({
         ...item,
-        poster_path: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
+        poster_path: posterUrl(item.poster_path, 'w500'),
         requested_at: item.created_at,
-        source_title: item.name
+        job_name: item.name
       });
     },
 
@@ -1046,6 +1108,7 @@ export default {
   },
   mounted() {
     this.loadApprovalState();
+    this.loadSeerBaseUrl();
     if (this.$route.query.status) {
       this.viewMode = 'all-requests';
       this.requestStatusFilter = this.$route.query.status;
