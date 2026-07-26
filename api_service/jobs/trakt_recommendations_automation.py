@@ -241,7 +241,7 @@ class TraktRecommendationsAutomation:
         provider = str(self.env_vars.get("SELECTED_SERVICE") or "").lower()
         max_content = int(self.env_vars.get("MAX_CONTENT_CHECK") or self.env_vars.get("MAX_CONTENT") or 10)
 
-        if provider == "jellyfin":
+        if provider in ("jellyfin", "emby"):
             from api_service.services.jellyfin.jellyfin_client import JellyfinClient
 
             jellyfin_libraries_raw = self.env_vars.get("JELLYFIN_LIBRARIES")
