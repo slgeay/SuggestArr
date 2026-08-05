@@ -143,7 +143,9 @@ class TMDbClient(BaseHTTPClient):
                     if dry_run:
                         imdb_result = self._get_imdb_filter_result(imdb_data)
                         filter_result['imdb_rating'] = imdb_result
-                        if not imdb_result['passed']:
+                        # 'passed' is tri-state: None means no IMDB data but
+                        # include_no_ratings allows it, so only False excludes.
+                        if imdb_result['passed'] is False:
                             filter_result['passed'] = False
                     elif not self._apply_imdb_filter(imdb_data, item, content_type):
                         return None

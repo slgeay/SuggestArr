@@ -233,6 +233,7 @@ export default {
     skipReason(item) {
       if (item.already_downloaded) return 'Already in your library';
       if (item.already_requested) return 'Already pending request';
+      if (item.excluded_by_seer_discovery) return 'Excluded by Honor Seer Discovery';
       // Find first failing filter
       const fr = item.filter_results;
       if (fr) {
@@ -242,6 +243,9 @@ export default {
             return f.reason ? `${f.label}: ${f.reason}` : `Filtered by ${f.label}`;
           }
         }
+        // Overall verdict disagrees with every individual filter: surface it
+        // instead of hiding the inconsistency behind the generic message.
+        if (fr.passed === false) return 'Filtered out (no filter reported a reason)';
       }
       return 'Filtered out';
     },
