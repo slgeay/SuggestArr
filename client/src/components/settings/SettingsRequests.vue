@@ -106,7 +106,21 @@
               </span>
               <div v-if="request._pending" class="pending-card-actions" @click.stop>
                 <template v-if="confirmRejectId === request.id"><button type="button" class="poster-action pending-cancel" aria-label="Cancel rejection" @click="confirmRejectId = null"><i class="fas fa-undo"></i></button><button type="button" class="poster-action pending-reject" :disabled="actionLoadingId === request.id" aria-label="Confirm rejection" @click="decidePending('reject', request.id)"><i class="fas fa-check"></i></button></template>
-                <template v-else><button type="button" class="poster-action pending-approve" :disabled="actionLoadingId === request.id" aria-label="Approve request" @click="decidePending('approve', request.id)"><i class="fas fa-check"></i></button><button type="button" class="poster-action pending-reject" :disabled="actionLoadingId === request.id" aria-label="Reject request" @click="confirmRejectId = request.id"><i class="fas fa-times"></i></button></template>
+                <template v-else>
+                  <template v-if="hasDualSeerConfig">
+                    <button
+                      v-for="target in seerTargets"
+                      :key="target.id"
+                      type="button"
+                      class="poster-action pending-approve"
+                      :disabled="actionLoadingId === request.id"
+                      :aria-label="`Approve on ${target.label}`"
+                      @click="decidePending('approve', request.id, target.id)"
+                    ><i class="fas fa-check"></i></button>
+                  </template>
+                  <button v-else type="button" class="poster-action pending-approve" :disabled="actionLoadingId === request.id" aria-label="Approve request" @click="decidePending('approve', request.id)"><i class="fas fa-check"></i></button>
+                  <button type="button" class="poster-action pending-reject" :disabled="actionLoadingId === request.id" aria-label="Reject request" @click="confirmRejectId = request.id"><i class="fas fa-times"></i></button>
+                </template>
               </div>
             </div>
 
@@ -144,9 +158,16 @@
             <div class="modal-details-section">
               <h2 class="modal-title">{{ selectedRequest.title }}</h2>
               <div class="badge-container"><span class="badge badge-media"><i :class="selectedRequest.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i> {{ selectedRequest.media_type?.toUpperCase() }}</span><span class="badge badge-rating"><i class="fas fa-star"></i> {{ selectedRequest.rating || 'N/A' }}</span><span v-if="selectedRequest.release_date" class="badge badge-date"><i class="fas fa-calendar"></i> {{ selectedRequest.release_date }}</span></div>
-              <div v-if="modalTmdbUrl || modalSeerrUrl" class="modal-external-links">
+              <div v-if="modalTmdbUrl || modalSeerrLinks.length" class="modal-external-links">
                 <a v-if="modalTmdbUrl" :href="modalTmdbUrl" target="_blank" rel="noopener noreferrer" class="modal-external-link"><i class="fas fa-database"></i><span>TMDb</span></a>
-                <a v-if="modalSeerrUrl" :href="modalSeerrUrl" target="_blank" rel="noopener noreferrer" class="modal-external-link"><i class="fas fa-paper-plane"></i><span>Seerr</span></a>
+                <a
+                  v-for="link in modalSeerrLinks"
+                  :key="link.id"
+                  :href="link.href"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="modal-external-link"
+                ><i class="fas fa-paper-plane"></i><span>{{ link.label }}</span></a>
               </div>
               <div v-if="selectedRequest.source_title && modalSourcePoster" class="modal-source-card">
                 <img :src="modalSourcePoster" :alt="selectedRequest.source_title" class="modal-source-poster" />
@@ -167,6 +188,8 @@
 
 <script>
 import axios from 'axios';
+import { workflowAction } from '@/api/api';
+import { fetchSeerTargets, hasDualSeer } from '@/composables/useSeerTargets.js';
 import { formatDate } from '@/utils/dateUtils.js';
 import { resolveTmdbId, tmdbUrl, seerrUrl, posterUrl } from '@/utils/mediaLinks.js';
 import '@/assets/styles/requestsPage.css';
@@ -188,7 +211,9 @@ export default {
       actionLoadingId: null,
       approvalEnabled: false,
       selectedRequest: null,
-      seerBaseUrl: '',
+      seerLinkTargets: [],
+      hasDualSeerConfig: false,
+      seerTargets: [],
       totalRequests: 0,
       loading: false,
       activeFilter: 'all',
@@ -212,8 +237,17 @@ export default {
       return tmdbUrl(this.selectedRequest?.media_type, resolveTmdbId(this.selectedRequest));
     },
 
-    modalSeerrUrl() {
-      return seerrUrl(this.seerBaseUrl, this.selectedRequest?.media_type, resolveTmdbId(this.selectedRequest));
+    modalSeerrLinks() {
+      const tmdbId = resolveTmdbId(this.selectedRequest);
+      const mediaType = this.selectedRequest?.media_type;
+      if (!tmdbId || !mediaType) return [];
+      return this.seerLinkTargets
+        .map((target) => ({
+          id: target.id,
+          label: target.label,
+          href: seerrUrl(target.web_url, mediaType, tmdbId),
+        }))
+        .filter((link) => link.href);
     },
 
     modalSourcePoster() {
@@ -224,17 +258,19 @@ export default {
     this.loadStats();
     this.loadRecentRequests();
     this.loadApprovalState();
-    this.loadSeerBaseUrl();
+    this.loadSeerLinkTargets();
   },
   methods: {
     formatDate,
 
-    async loadSeerBaseUrl() {
+    async loadSeerLinkTargets() {
       try {
-        const { data } = await axios.get('/api/seer/web-url');
-        this.seerBaseUrl = data.url || '';
+        const targets = await fetchSeerTargets();
+        this.seerLinkTargets = targets.filter((target) => target.configured);
+        this.seerTargets = this.seerLinkTargets;
+        this.hasDualSeerConfig = hasDualSeer(targets);
       } catch (error) {
-        console.error('Error loading Seer URL:', error);
+        console.error('Error loading Seer targets:', error);
       }
     },
 
@@ -304,10 +340,10 @@ export default {
       }
     },
 
-    async decidePending(action, id) {
+    async decidePending(action, id, seerTarget = 'primary') {
       this.actionLoadingId = id;
       try {
-        await axios.post(`/api/automation/requests/workflow/${action}`, { ids: [id] });
+        await workflowAction(action, [id], { seerTarget });
         this.confirmRejectId = null;
         await this.loadPendingRequests();
         this.$toast.open({ message: action === 'approve' ? 'Request queued for Seer' : 'Request rejected', type: 'success' });

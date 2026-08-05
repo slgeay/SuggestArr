@@ -8,6 +8,11 @@ from api_service.config.config import load_env_vars
 from api_service.config.logger_manager import LoggerManager
 from api_service.db.database_manager import DatabaseManager
 from api_service.utils.asyncio_loop import close_event_loop
+from api_service.services.config_service import ConfigService
+from api_service.services.seer.seer_config import (
+    is_secondary_seer_configured,
+    normalize_seer_target,
+)
 
 logger = LoggerManager().get_logger("AutomationRoute")
 automation_bp = Blueprint('automation', __name__)
@@ -25,6 +30,23 @@ def _workflow_ids():
 
 def _workflow_owner():
     return None if g.current_user.get('role') == 'admin' else int(g.current_user['id'])
+
+
+def _parse_seer_target():
+    """
+    Parse and validate an optional Seer target from the workflow request body.
+
+    Returns:
+        Tuple of (target, error_response). error_response is None when valid.
+    """
+    data = request.get_json(silent=True) or {}
+    target = normalize_seer_target(data.get('seer_target'))
+    if target == 'secondary' and not is_secondary_seer_configured(ConfigService.get_runtime_config()):
+        return None, (jsonify({
+            'status': 'error',
+            'message': 'Secondary Seer is not configured.',
+        }), 400)
+    return target, None
 
 
 def _visible_request_user_ids(db):
@@ -62,8 +84,13 @@ def _decide_workflow(approve, blacklist=False):
     ids = _workflow_ids()
     if ids is None:
         return jsonify({'status': 'error', 'message': 'ids must contain 1 to 100 integers'}), 400
+    seer_target, error = _parse_seer_target()
+    if error:
+        return error
     changed = DatabaseManager().decide_suggestions(
-        ids, _workflow_owner(), int(g.current_user['id']), approve, blacklist)
+        ids, _workflow_owner(), int(g.current_user['id']), approve, blacklist,
+        seer_target=seer_target if approve else None,
+    )
     return jsonify({'status': 'success', 'updated': changed}), 200
 
 
@@ -91,7 +118,10 @@ def retry_workflow():
     ids = _workflow_ids()
     if ids is None:
         return jsonify({'status': 'error', 'message': 'ids must contain 1 to 100 integers'}), 400
-    changed = DatabaseManager().retry_suggestions(ids, _workflow_owner())
+    seer_target, error = _parse_seer_target()
+    if error:
+        return error
+    changed = DatabaseManager().retry_suggestions(ids, _workflow_owner(), seer_target=seer_target)
     return jsonify({'status': 'success', 'updated': changed}), 200
 
 
@@ -102,7 +132,12 @@ def request_workflow_again():
     if ids is None:
         return jsonify({'status': 'error', 'message': 'ids must contain 1 to 100 integers'}), 400
     remove_blacklist = bool((request.get_json(silent=True) or {}).get('remove_blacklist'))
-    changed = DatabaseManager().request_rejected(ids, _workflow_owner(), remove_blacklist)
+    seer_target, error = _parse_seer_target()
+    if error:
+        return error
+    changed = DatabaseManager().request_rejected(
+        ids, _workflow_owner(), remove_blacklist, seer_target=seer_target,
+    )
     return jsonify({'status': 'success', 'updated': changed}), 200
 
 

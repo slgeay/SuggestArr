@@ -7,6 +7,7 @@ from api_service.services.request_sources import (
     is_tmdb_metadata_source_id,
     resolve_request_source_label,
 )
+from api_service.services.seer.seer_targets import normalize_seer_target
 
 class RequestQueueMixin:
     def try_acquire_submission_lock(self, tmdb_id: str, media_type: str, ttl_seconds: int = 60) -> bool:
@@ -269,9 +270,51 @@ class RequestQueueMixin:
             item['source_title'] = resolve_request_source_label(item.get('source_id'), title)
             item['source_poster_path'] = poster_path
 
-    def decide_suggestions(self, ids, owner_id, decided_by, approve, blacklist=False):
+    def _apply_seer_target_to_payloads(self, ids, owner_id, seer_target):
+        """
+        Merge ``_seer_target`` into queued payloads before manual resubmission.
+
+        Args:
+            ids: Pending request row ids.
+            owner_id: Owner filter, or None for admin scope.
+            seer_target: ``primary`` or ``secondary``.
+
+        Returns:
+            Number of payload rows updated.
+        """
         if not ids:
             return 0
+        target = normalize_seer_target(seer_target)
+        ph = '%s' if self.db_type in ('mysql', 'mariadb', 'postgres') else '?'
+        marks = ','.join([ph] * len(ids))
+        owner_clause = '' if owner_id is None else f' AND owner_id={ph}'
+        params = [*ids] + ([] if owner_id is None else [owner_id])
+        updated = 0
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT id, payload FROM pending_requests WHERE id IN ({marks}){owner_clause}",
+                tuple(params),
+            )
+            for row_id, payload_raw in cursor.fetchall():
+                try:
+                    payload = json.loads(payload_raw)
+                except (json.JSONDecodeError, TypeError):
+                    payload = {}
+                payload['_seer_target'] = target
+                cursor.execute(
+                    f"UPDATE pending_requests SET payload={ph} WHERE id={ph}",
+                    (json.dumps(payload), row_id),
+                )
+                updated += cursor.rowcount
+            conn.commit()
+        return updated
+
+    def decide_suggestions(self, ids, owner_id, decided_by, approve, blacklist=False, seer_target=None):
+        if not ids:
+            return 0
+        if approve and seer_target is not None:
+            self._apply_seer_target_to_payloads(ids, owner_id, seer_target)
         ph = '%s' if self.db_type in ('mysql', 'mariadb', 'postgres') else '?'
         marks = ','.join([ph] * len(ids))
         owner_clause = '' if owner_id is None else f' AND owner_id={ph}'
@@ -324,9 +367,11 @@ class RequestQueueMixin:
             conn.commit()
             return changed
 
-    def retry_suggestions(self, ids, owner_id):
+    def retry_suggestions(self, ids, owner_id, seer_target=None):
         if not ids:
             return 0
+        if seer_target is not None:
+            self._apply_seer_target_to_payloads(ids, owner_id, seer_target)
         ph = '%s' if self.db_type in ('mysql', 'mariadb', 'postgres') else '?'
         marks = ','.join([ph] * len(ids))
         owner_clause = '' if owner_id is None else f' AND owner_id={ph}'
@@ -339,9 +384,11 @@ class RequestQueueMixin:
             conn.commit()
             return cursor.rowcount
 
-    def request_rejected(self, ids, owner_id, remove_blacklist=False):
+    def request_rejected(self, ids, owner_id, remove_blacklist=False, seer_target=None):
         if not ids:
             return 0
+        if seer_target is not None:
+            self._apply_seer_target_to_payloads(ids, owner_id, seer_target)
         ph = '%s' if self.db_type in ('mysql', 'mariadb', 'postgres') else '?'
         marks = ','.join([ph] * len(ids))
         owner_clause = '' if owner_id is None else f' AND owner_id={ph}'

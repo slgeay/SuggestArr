@@ -646,6 +646,86 @@
             </div>
           </div>
         </div>
+
+        <!-- Secondary Seer (optional, dashboard only) -->
+        <div v-if="!wizardMode" class="collapsible-section">
+          <button class="collapsible-toggle" @click="secondarySeerExpanded = !secondarySeerExpanded">
+            <i class="fas fa-chevron-right toggle-arrow" :class="{ expanded: secondarySeerExpanded }"></i>
+            <span>Secondary Seer</span>
+            <span class="toggle-summary" v-if="!secondarySeerExpanded">{{ secondarySeerSummary }}</span>
+          </button>
+          <div class="collapsible-content" v-show="secondarySeerExpanded">
+            <p class="advanced-block-desc">
+              Optional second Jellyseerr/Overseer instance. Manual request buttons let you choose which Seer receives each submission.
+            </p>
+
+            <div class="form-group">
+              <label for="secondarySeerApiUrl">API URL</label>
+              <input
+                id="secondarySeerApiUrl"
+                v-model="localConfig.SECONDARY_SEER_API_URL"
+                type="url"
+                placeholder="http://localhost:5056"
+                class="form-control"
+                :disabled="isLoading"
+                @input="onSecondarySeerConfigChange"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="secondarySeerToken">API Token</label>
+              <div class="input-group">
+                <input
+                  id="secondarySeerToken"
+                  v-model="localConfig.SECONDARY_SEER_TOKEN"
+                  :type="showSecondarySeerToken ? 'text' : 'password'"
+                  placeholder="Enter the secondary API token"
+                  class="form-control"
+                  :disabled="isLoading"
+                  @input="onSecondarySeerConfigChange"
+                />
+                <button @click="showSecondarySeerToken = !showSecondarySeerToken" type="button" class="btn btn-outline btn-sm" :disabled="isLoading">
+                  <i :class="showSecondarySeerToken ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="seerPrimaryLabel">Primary button label</label>
+              <input
+                id="seerPrimaryLabel"
+                v-model="localConfig.SEER_PRIMARY_LABEL"
+                type="text"
+                placeholder="Primary"
+                class="form-control"
+                :disabled="isLoading"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="secondarySeerLabel">Secondary button label</label>
+              <input
+                id="secondarySeerLabel"
+                v-model="localConfig.SECONDARY_SEER_LABEL"
+                type="text"
+                placeholder="Secondary"
+                class="form-control"
+                :disabled="isLoading"
+              />
+            </div>
+
+            <button
+              @click="testSecondarySeerConnection"
+              class="btn btn-outline btn-block"
+              :disabled="isLoading || !localConfig.SECONDARY_SEER_API_URL || !localConfig.SECONDARY_SEER_TOKEN || secondarySeerTesting"
+            >
+              <i v-if="secondarySeerTesting" class="fas fa-spinner fa-spin"></i>
+              <i v-else-if="secondarySeerConnected" class="fas fa-check"></i>
+              <i v-else class="fas fa-plug"></i>
+              {{ secondarySeerTesting ? 'Testing...' : (secondarySeerConnected ? 'Connected' : 'Test Connection') }}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -678,7 +758,7 @@ import BaseDropdown from '@/components/common/BaseDropdown.vue';
 import {
   testSeerApi, authenticateUser, fetchRadarrServers, fetchSonarrServers,
   fetchJellyfinLibraries, fetchJellyfinUsers, fetchPlexLibraries, fetchPlexUsers,
-  testOmdbApi, testTmdbApi
+  testOmdbApi, testTmdbApi, testSecondarySeerApi
 } from '@/api/api';
 
 export default {
@@ -721,6 +801,7 @@ export default {
       showPlexToken: false,
       showJellyfinToken: false,
       showSecondaryToken: false,
+      showSecondarySeerToken: false,
       showSeerToken: false,
       showTraktClientSecret: false,
       // Wizard-mode self-contained TMDB test state
@@ -734,6 +815,7 @@ export default {
       mediaServerAdvancedExpanded: false,
       seerAdvancedExpanded: false,
       secondaryExpanded: false,
+      secondarySeerExpanded: false,
       serviceOptions: [
         { value: 'plex', label: 'Plex' },
         { value: 'jellyfin', label: 'Jellyfin' },
@@ -753,6 +835,8 @@ export default {
       seerUserPassword: '',
       seerAuthenticated: false,
       seerAuthenticating: false,
+      secondarySeerTesting: false,
+      secondarySeerConnected: false,
       // Download profiles
       loadingServers: false,
       serversLoaded: false,
@@ -838,6 +922,12 @@ export default {
       if (!this.localConfig.SECONDARY_SERVICE) return 'Not configured';
       const count = (this.localConfig.SECONDARY_LIBRARIES || []).length;
       return `${this.secondaryServiceLabel}, ${count} libraries`;
+    },
+    secondarySeerSummary() {
+      if (!this.localConfig.SECONDARY_SEER_API_URL || !this.localConfig.SECONDARY_SEER_TOKEN) {
+        return 'Not configured';
+      }
+      return this.secondarySeerConnected ? 'Connected' : 'Configured';
     },
     secondaryLibraryOptions() {
       if (this.localConfig.SECONDARY_SERVICE === 'plex') {
@@ -1556,6 +1646,30 @@ export default {
       }
     },
     onSeerConfigChange() { this.seerConnected = false; this.seerUsers = []; this.seerAuthenticated = false; },
+    onSecondarySeerConfigChange() { this.secondarySeerConnected = false; },
+    async testSecondarySeerConnection() {
+      const apiUrl = (this.localConfig.SECONDARY_SEER_API_URL || '').trim();
+      const apiToken = (this.localConfig.SECONDARY_SEER_TOKEN || '').trim();
+      if (!apiUrl || !apiToken) return;
+      this.secondarySeerTesting = true;
+      this.secondarySeerConnected = false;
+      try {
+        await testSecondarySeerApi({
+          SECONDARY_SEER_API_URL: apiUrl,
+          SECONDARY_SEER_TOKEN: apiToken,
+        });
+        this.secondarySeerConnected = true;
+        if (this.$toast) {
+          this.$toast.success('Secondary Seer connection successful.', { position: 'top-right', duration: 3000 });
+        }
+      } catch (error) {
+        console.error('Secondary Seer connection test failed:', error);
+        this.secondarySeerConnected = false;
+        this._notifyError('Failed to connect to secondary Seer. Verify URL and API key.');
+      } finally {
+        this.secondarySeerTesting = false;
+      }
+    },
     onSeerUserChange(value) { this.selectedSeerUser = value; this.localConfig.SEER_USER_NAME = value; this.seerAuthenticated = false; },
     async authenticateSeerUser() {
       if (!this.selectedSeerUser || !this.seerUserPassword) return;
@@ -1687,6 +1801,13 @@ export default {
           SEER_SESSION_TOKEN: this._secretValue('SEER_SESSION_TOKEN') || null,
           SEER_ANIME_PROFILE_CONFIG: this.localConfig.SEER_ANIME_PROFILE_CONFIG || {},
           SEER_REQUEST_DELAY: this.localConfig.SEER_REQUEST_DELAY ?? 2,
+          SEER_PRIMARY_LABEL: this.localConfig.SEER_PRIMARY_LABEL || 'Primary',
+          SECONDARY_SEER_API_URL: this.localConfig.SECONDARY_SEER_API_URL || '',
+          SECONDARY_SEER_TOKEN: this._secretValue('SECONDARY_SEER_TOKEN') || '',
+          SECONDARY_SEER_USER_NAME: this.localConfig.SECONDARY_SEER_USER_NAME || null,
+          SECONDARY_SEER_USER_PSW: this._secretValue('SECONDARY_SEER_USER_PSW') || null,
+          SECONDARY_SEER_SESSION_TOKEN: this._secretValue('SECONDARY_SEER_SESSION_TOKEN') || null,
+          SECONDARY_SEER_LABEL: this.localConfig.SECONDARY_SEER_LABEL || 'Secondary',
           SELECTED_USERS: this.localConfig.SELECTED_USERS || [],
         });
         await this.$emit('save-section', { section: 'services', data: dataToSave });
@@ -1703,11 +1824,16 @@ export default {
         SECONDARY_SERVICE: '', SECONDARY_API_URL: '', SECONDARY_TOKEN: '', SECONDARY_LIBRARIES: [],
         TRAKT_CLIENT_ID: '', TRAKT_CLIENT_SECRET: '',
         SEER_API_URL: '', SEER_TOKEN: '', SEER_USER_NAME: null, SEER_USER_PSW: null,
-        SEER_SESSION_TOKEN: null, SEER_ANIME_PROFILE_CONFIG: {}, SEER_REQUEST_DELAY: 2, SELECTED_USERS: [],
+        SEER_SESSION_TOKEN: null, SEER_ANIME_PROFILE_CONFIG: {}, SEER_REQUEST_DELAY: 2,
+        SEER_PRIMARY_LABEL: 'Primary',
+        SECONDARY_SEER_API_URL: '', SECONDARY_SEER_TOKEN: '', SECONDARY_SEER_USER_NAME: null,
+        SECONDARY_SEER_USER_PSW: null, SECONDARY_SEER_SESSION_TOKEN: null, SECONDARY_SEER_LABEL: 'Secondary',
+        SELECTED_USERS: [],
       };
       if (confirm('Are you sure you want to reset all service settings to their defaults?')) {
         this.localConfig = { ...this.localConfig, ...defaults };
         this.seerConnected = false; this.seerAuthenticated = false; this.seerUsers = [];
+        this.secondarySeerConnected = false;
         this.omdbConnected = false;
         this.radarrServers = []; this.sonarrServers = [];
         this.jellyfinConnected = false; this.jellyfinLibraries = []; this.jellyfinUsers = [];

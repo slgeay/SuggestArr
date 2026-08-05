@@ -210,9 +210,23 @@
             </div>
 
             <!-- Request Button -->
+            <div v-if="hasDualSeerConfig" class="request-btn-row">
+              <button
+                v-for="target in seerTargets"
+                :key="target.id"
+                @click="requestItem(item, target.id)"
+                :disabled="requestedIds.has(seerRequestKey(item, target.id)) || requestingIds.has(seerRequestKey(item, target.id))"
+                class="btn request-btn"
+                :class="requestButtonClass(item, target.id)"
+              >
+                <i :class="requestButtonIcon(item, target.id)"></i>
+                {{ requestButtonLabel(item, target.id, target.label) }}
+              </button>
+            </div>
             <button
+              v-else
               @click="requestItem(item)"
-              :disabled="requestedIds.has(item.id + '-' + item.media_type) || requestingIds.has(item.id + '-' + item.media_type)"
+              :disabled="requestedIds.has(seerRequestKey(item)) || requestingIds.has(seerRequestKey(item))"
               class="btn request-btn"
               :class="requestButtonClass(item)"
             >
@@ -319,9 +333,23 @@
                 </div>
 
                 <!-- Request button -->
+                <div v-if="hasDualSeerConfig" class="request-btn-row">
+                  <button
+                    v-for="target in seerTargets"
+                    :key="target.id"
+                    @click="requestItem(selectedItem, target.id)"
+                    :disabled="requestedIds.has(seerRequestKey(selectedItem, target.id)) || requestingIds.has(seerRequestKey(selectedItem, target.id))"
+                    class="btn ai-modal-req-btn"
+                    :class="requestButtonClass(selectedItem, target.id)"
+                  >
+                    <i :class="requestButtonIcon(selectedItem, target.id)"></i>
+                    {{ requestButtonLabel(selectedItem, target.id, target.label) }}
+                  </button>
+                </div>
                 <button
+                  v-else
                   @click="requestItem(selectedItem)"
-                  :disabled="requestedIds.has(selectedItem.id + '-' + selectedItem.media_type) || requestingIds.has(selectedItem.id + '-' + selectedItem.media_type)"
+                  :disabled="requestedIds.has(seerRequestKey(selectedItem)) || requestingIds.has(seerRequestKey(selectedItem))"
                   class="btn ai-modal-req-btn"
                   :class="requestButtonClass(selectedItem)"
                 >
@@ -339,6 +367,7 @@
 
 <script>
 import { aiSearch, aiSearchRequest, aiSearchStatus, aiSearchFeedbackList, aiSearchFeedbackSet, aiSearchFeedbackDelete, aiSearchSeenClear } from '@/api/api.js';
+import { fetchSeerTargets, hasDualSeer, seerRequestKey } from '@/composables/useSeerTargets.js';
 import '@/assets/styles/aiSearchPage.css';
 
 export default {
@@ -356,6 +385,8 @@ export default {
       llmAvailable: true,
       requestedIds: new Set(),
       requestingIds: new Set(),
+      seerTargets: [],
+      hasDualSeerConfig: false,
       // Item detail modal
       selectedItem: null,
       // Advanced options
@@ -524,14 +555,21 @@ export default {
       }
     },
 
-    async requestItem(item) {
-      const key = item.id + '-' + item.media_type;
+    async requestItem(item, seerTarget = 'primary') {
+      const key = seerRequestKey(item, seerTarget);
       if (this.requestedIds.has(key) || this.requestingIds.has(key)) return;
 
       this.requestingIds = new Set([...this.requestingIds, key]);
 
       try {
-        const res = await aiSearchRequest(item.id, item.media_type, item.rationale || '', item, this.query.trim());
+        const res = await aiSearchRequest(
+          item.id,
+          item.media_type,
+          item.rationale || '',
+          item,
+          this.query.trim(),
+          seerTarget,
+        );
         if (res.data.status === 'success') {
           this.requestedIds = new Set([...this.requestedIds, key]);
         } else {
@@ -543,6 +581,14 @@ export default {
       } finally {
         this.requestingIds = new Set([...this.requestingIds].filter(k => k !== key));
       }
+    },
+
+    seerRequestKey,
+
+    async loadSeerTargets() {
+      const targets = await fetchSeerTargets();
+      this.seerTargets = targets.filter((target) => target.configured);
+      this.hasDualSeerConfig = hasDualSeer(targets);
     },
 
     saveToHistory(query) {
@@ -590,31 +636,32 @@ export default {
       return String(n);
     },
 
-    requestButtonClass(item) {
-      const key = item.id + '-' + item.media_type;
+    requestButtonClass(item, seerTarget = 'primary') {
+      const key = seerRequestKey(item, seerTarget);
       if (this.requestedIds.has(key)) return 'btn-success';
       if (this.requestingIds.has(key)) return 'btn-outline';
       return 'btn-primary';
     },
 
-    requestButtonIcon(item) {
-      const key = item.id + '-' + item.media_type;
+    requestButtonIcon(item, seerTarget = 'primary') {
+      const key = seerRequestKey(item, seerTarget);
       if (this.requestedIds.has(key)) return 'fas fa-check';
       if (this.requestingIds.has(key)) return 'fas fa-spinner fa-spin';
       return 'fas fa-plus';
     },
 
-    requestButtonLabel(item) {
-      const key = item.id + '-' + item.media_type;
-      if (this.requestedIds.has(key)) return 'Requested';
+    requestButtonLabel(item, seerTarget = 'primary', targetLabel = null) {
+      const key = seerRequestKey(item, seerTarget);
+      if (this.requestedIds.has(key)) return targetLabel ? `${targetLabel} requested` : 'Requested';
       if (this.requestingIds.has(key)) return 'Requesting...';
-      return 'Request';
+      return targetLabel || 'Request';
     },
   },
 
   mounted() {
     this.checkLlmStatus();
     this.loadFeedback();
+    this.loadSeerTargets();
     this._onKeydown = (e) => { if (e.key === 'Escape') this.closeModal(); };
     window.addEventListener('keydown', this._onKeydown);
   },
@@ -627,6 +674,11 @@ export default {
 </script>
 
 <style scoped>
+.request-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
 
 .section-header h2 {
   font-size: 1.8rem;

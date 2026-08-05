@@ -21,7 +21,7 @@
     <div v-else class="requests-grid">
       <article v-for="item in items" :key="item.id" class="request-card card card--column card--interactive card--padding-none" :class="{ 'card--selected': selected.includes(item.id) }" tabindex="0" @click="openItem(item)" @keydown.enter="openItem(item)">
         <label v-if="bulkMode" class="workflow-checkbox tabs-checkboxes" @click.stop><input v-model="selected" type="checkbox" :value="item.id" /><span class="sr-only">Select {{ item.title }}</span></label>
-        <div class="request-card-poster"><img v-if="item.poster_path" :src="`https://image.tmdb.org/t/p/w342${item.poster_path}`" :alt="item.title" class="poster-image" /><div v-else class="poster-placeholder"><i class="fas fa-image"></i></div><div v-if="!bulkMode && item.status === 'awaiting_approval'" class="poster-actions"><button type="button" class="poster-action poster-action--approve" :disabled="actionLoading" aria-label="Approve request" title="Approve" @click.stop="decideOne('approve', item.id)"><i class="fas fa-check"></i></button><button type="button" class="poster-action poster-action--reject" :disabled="actionLoading" aria-label="Reject request" title="Reject" @click.stop="confirmSingle('reject', item.id)"><i class="fas fa-times"></i></button></div><div v-else-if="!bulkMode && item.status === 'failed'" class="poster-actions"><button type="button" class="poster-action poster-action--retry" :disabled="actionLoading" aria-label="Retry request" title="Retry" @click.stop="decideOne('retry', item.id)"><i class="fas fa-redo"></i></button></div><div v-else-if="!bulkMode && (item.status === 'rejected' || item.status === 'blacklisted')" class="poster-actions"><button type="button" class="poster-action poster-action--retry" :disabled="actionLoading" aria-label="Request again" title="Request again" @click.stop="confirmRequestAgain(item)"><i class="fas fa-paper-plane"></i></button></div></div>
+        <div class="request-card-poster"><img v-if="item.poster_path" :src="`https://image.tmdb.org/t/p/w342${item.poster_path}`" :alt="item.title" class="poster-image" /><div v-else class="poster-placeholder"><i class="fas fa-image"></i></div><div v-if="!bulkMode && item.status === 'awaiting_approval'" class="poster-actions"><template v-if="hasDualSeerConfig"><button v-for="target in seerTargets" :key="target.id" type="button" class="poster-action poster-action--approve" :disabled="actionLoading" :aria-label="`Approve on ${target.label}`" :title="`Approve (${target.label})`" @click.stop="decideOne('approve', item.id, target.id)"><i class="fas fa-check"></i></button></template><button v-else type="button" class="poster-action poster-action--approve" :disabled="actionLoading" aria-label="Approve request" title="Approve" @click.stop="decideOne('approve', item.id)"><i class="fas fa-check"></i></button><button type="button" class="poster-action poster-action--reject" :disabled="actionLoading" aria-label="Reject request" title="Reject" @click.stop="confirmSingle('reject', item.id)"><i class="fas fa-times"></i></button></div><div v-else-if="!bulkMode && item.status === 'failed'" class="poster-actions"><button type="button" class="poster-action poster-action--retry" :disabled="actionLoading" aria-label="Retry request" title="Retry" @click.stop="confirmRetry(item)"><i class="fas fa-redo"></i></button></div><div v-else-if="!bulkMode && (item.status === 'rejected' || item.status === 'blacklisted')" class="poster-actions"><button type="button" class="poster-action poster-action--retry" :disabled="actionLoading" aria-label="Request again" title="Request again" @click.stop="confirmRequestAgain(item)"><i class="fas fa-paper-plane"></i></button></div></div>
         <div class="request-card-body"><h3 class="request-card-title">{{ item.title || `TMDb ${item.tmdb_id}` }}</h3><div class="badge-container"><span class="badge badge-media">{{ item.media_type.toUpperCase() }}</span><span class="badge badge-rating"><i class="fas fa-star"></i> {{ formatRating(item.rating) }}</span><span class="badge badge-requested">{{ statusLabel(item.status) }}</span></div><div class="source-link"><span>From: <strong>{{ item.name }}</strong></span></div><div v-if="item.user_name || item.media_user_id" class="source-link"><i class="fas fa-user"></i><span>For: <strong>{{ item.user_name || item.media_user_id }}</strong></span></div><small v-if="item.status === 'failed'">{{ item.last_error || `Failed after ${item.retry_count} attempts` }}</small></div>
       </article>
     </div>
@@ -31,7 +31,18 @@
         <div class="modal modal--md workflow-confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
           <div class="modal-header" :class="{ 'modal-header--danger': confirmation.action === 'reject' || confirmation.action === 'blacklist' }"><div class="modal-title-wrap"><h3 id="confirm-title" class="modal-title"><i :class="confirmation.icon"></i>{{ confirmation.title }}</h3><p class="modal-subtitle">{{ confirmation.message }}</p></div><button type="button" class="modal-close" aria-label="Close confirmation" @click="confirmation = null"><i class="fas fa-times"></i></button></div>
           <div class="modal-body"><template v-if="confirmation.action === 'reject'"><p class="workflow-confirm-label">Requests to reject</p><div class="workflow-confirm-items"><div v-for="item in confirmation.items" :key="item.id" class="workflow-confirm-item"><img v-if="item.poster_path" :src="`https://image.tmdb.org/t/p/w92${item.poster_path}`" alt="" /><span v-else class="workflow-confirm-placeholder"><i class="fas fa-film"></i></span><div><strong>{{ item.title || `TMDb ${item.tmdb_id}` }}</strong><small>{{ item.media_type.toUpperCase() }}<template v-if="item.name"> · Suggested from {{ item.name }}</template></small></div></div></div><div class="workflow-confirm-note"><i class="fas fa-info-circle" aria-hidden="true"></i><p>These items will be archived, not blacklisted. You can find them later by filtering requests by <strong>Rejected</strong> and request them again.</p></div></template><div v-else class="workflow-confirm-message"><i :class="confirmation.icon" aria-hidden="true"></i><p>{{ confirmation.message }}</p></div></div>
-          <div class="modal-footer"><BaseButton variant="secondary" @click="confirmation = null">Cancel</BaseButton><BaseButton :variant="confirmation.action === 'approve' ? 'success' : 'danger'" @click="decide">{{ confirmation.confirmLabel }}</BaseButton></div>
+          <div class="modal-footer">
+            <BaseButton variant="secondary" @click="confirmation = null">Cancel</BaseButton>
+            <template v-if="needsSeerChoice">
+              <BaseButton
+                v-for="target in seerTargets"
+                :key="target.id"
+                variant="success"
+                @click="decide(target.id)"
+              >{{ target.label }}</BaseButton>
+            </template>
+            <BaseButton v-else :variant="confirmation.action === 'approve' ? 'success' : 'danger'" @click="decide()">{{ confirmation.confirmLabel }}</BaseButton>
+          </div>
         </div>
       </div>
     </Teleport>
@@ -41,17 +52,23 @@
 <script>
 import axios from 'axios';
 import BaseButton from '@/components/ui/BaseButton.vue';
+import { workflowAction } from '@/api/api';
+import { fetchSeerTargets, hasDualSeer } from '@/composables/useSeerTargets.js';
 export default {
   name: 'RequestWorkflowPanel', components: { BaseButton },
   emits: ['open', 'update:total'],
   props: { statusFilter: { type: String, default: 'all' }, searchQuery: { type: String, default: '' }, mediaType: { type: String, default: 'all' }, requestedFor: { type: String, default: 'all' }, showHeader: { type: Boolean, default: true }, showEmpty: { type: Boolean, default: true }, bulkMode: { type: Boolean, default: false } },
-  data() { return { items: [], selected: [], actionLoading: false, jobs: [], jobId: null, loading: false, running: false, search: '', status: this.statusFilter, page: 1, pages: 1, total: 0, confirmation: null, searchTimer: null, observer: null,
+  data() { return { items: [], selected: [], actionLoading: false, jobs: [], jobId: null, loading: false, running: false, search: '', status: this.statusFilter, page: 1, pages: 1, total: 0, confirmation: null, searchTimer: null, observer: null, seerTargets: [], hasDualSeerConfig: false,
     statuses: [{ value: 'awaiting_approval', label: 'Awaiting approval' }, { value: 'queued', label: 'Queued' }, { value: 'submitted', label: 'Submitted' }, { value: 'rejected', label: 'Rejected' }, { value: 'failed', label: 'Failed' }, { value: 'blacklisted', label: 'Blacklisted' }] }; },
   computed: {
     selectedItems() { return this.items.filter(item => this.selected.includes(item.id)); },
     canApprove() { return this.selectedItems.length > 0 && this.selectedItems.every(item => item.status === 'awaiting_approval'); },
     canRetry() { return this.selectedItems.length > 0 && this.selectedItems.every(item => item.status === 'failed'); },
-    canRequestAgain() { return this.selectedItems.length > 0 && this.selectedItems.every(item => ['rejected', 'blacklisted'].includes(item.status)); }
+    canRequestAgain() { return this.selectedItems.length > 0 && this.selectedItems.every(item => ['rejected', 'blacklisted'].includes(item.status)); },
+    needsSeerChoice() {
+      if (!this.confirmation || !this.hasDualSeerConfig) return false;
+      return ['approve', 'retry', 'request-again'].includes(this.confirmation.action);
+    },
   },
   watch: {
     statusFilter(value) { this.status = value; this.load(1); },
@@ -60,7 +77,14 @@ export default {
     requestedFor() { this.load(1); },
     bulkMode(value) { if (!value) this.selected = []; }
   },
-  async mounted() { const requested = this.$route.query.status; if (this.statuses.some(option => option.value === requested)) this.status = requested; const response = await axios.get('/api/jobs'); this.jobs = (response.data.jobs || []).filter(job => job.delivery_mode === 'manual'); this.load(); },
+  async mounted() {
+    const requested = this.$route.query.status;
+    if (this.statuses.some(option => option.value === requested)) this.status = requested;
+    const response = await axios.get('/api/jobs');
+    this.jobs = (response.data.jobs || []).filter(job => job.delivery_mode === 'manual');
+    await this.loadSeerTargets();
+    this.load();
+  },
   beforeUnmount() { clearTimeout(this.searchTimer); this.observer?.disconnect(); },
   methods: {
     async load(page = this.page) {
@@ -95,11 +119,45 @@ export default {
       if (index === -1) this.selected.push(item.id);
       else this.selected.splice(index, 1);
     },
-    async decideOne(action, id) { this.actionLoading = true; try { await axios.post(`/api/automation/requests/workflow/${action}`, { ids: [id] }); await this.load(); this.$toast.open({ message: action === 'approve' ? 'Request queued for Seer' : 'Request updated', type: 'success' }); } finally { this.actionLoading = false; } },
+    async loadSeerTargets() {
+      const targets = await fetchSeerTargets();
+      this.seerTargets = targets.filter((target) => target.configured);
+      this.hasDualSeerConfig = hasDualSeer(targets);
+    },
+    async decideOne(action, id, seerTarget = 'primary') {
+      if (action === 'approve' && this.hasDualSeerConfig && !seerTarget) return;
+      this.actionLoading = true;
+      try {
+        await workflowAction(action, [id], { seerTarget });
+        await this.load();
+        this.$toast.open({ message: action === 'approve' ? 'Request queued for Seer' : 'Request updated', type: 'success' });
+      } finally { this.actionLoading = false; }
+    },
     confirmAction(action) { const labels = { approve: ['Send to Seer', `Send ${this.selected.length} selected items using the identity and profiles shown on each card?`, 'fas fa-paper-plane', 'Send'], reject: ['Reject requests', `${this.selected.length} selected items will be removed from the approval queue.`, 'fas fa-archive', 'Reject requests'], blacklist: ['Blacklist requests', `Permanently prevent ${this.selected.length} items from being suggested again?`, 'fas fa-ban', 'Blacklist'], retry: ['Retry failed requests', `Queue ${this.selected.length} failed items for another delivery attempt?`, 'fas fa-redo', 'Retry'], 'request-again': ['Request again', `Remove any blacklist and send ${this.selected.length} selected items to Seer?`, 'fas fa-paper-plane', 'Request again'] }; this.confirmation = { action, ids: [...this.selected], items: [...this.selectedItems], removeBlacklist: action === 'request-again' && this.selectedItems.some(item => item.status === 'blacklisted'), title: labels[action][0], message: labels[action][1], icon: labels[action][2], confirmLabel: labels[action][3] }; },
     confirmSingle(action, id) { const item = this.items.find(request => request.id === id); this.confirmation = { action, ids: [id], items: [item], title: 'Reject request', message: 'This item will be removed from the approval queue.', icon: 'fas fa-archive', confirmLabel: 'Reject request' }; },
-    confirmRequestAgain(item) { this.confirmation = { action: 'request-again', ids: [item.id], removeBlacklist: item.status === 'blacklisted', title: 'Request again', message: item.status === 'blacklisted' ? 'Remove this item from the blacklist and send it to Seer?' : 'Send this rejected item to Seer?', icon: 'fas fa-paper-plane', confirmLabel: 'Request again' }; },
-    async decide() { const { action, ids, removeBlacklist } = this.confirmation; await axios.post(`/api/automation/requests/workflow/${action}`, { ids, remove_blacklist: removeBlacklist }); this.confirmation = null; await this.load(); this.$toast.open({ message: 'Requests updated', type: 'success' }); },
+    confirmRetry(item) {
+      if (this.hasDualSeerConfig) {
+        this.confirmation = {
+          action: 'retry',
+          ids: [item.id],
+          items: [item],
+          title: 'Retry request',
+          message: 'Choose which Seer should receive this retry.',
+          icon: 'fas fa-redo',
+          confirmLabel: 'Retry',
+        };
+        return;
+      }
+      this.decideOne('retry', item.id);
+    },
+    confirmRequestAgain(item) { this.confirmation = { action: 'request-again', ids: [item.id], items: [item], removeBlacklist: item.status === 'blacklisted', title: 'Request again', message: item.status === 'blacklisted' ? 'Remove this item from the blacklist and send it to Seer?' : 'Send this rejected item to Seer?', icon: 'fas fa-paper-plane', confirmLabel: 'Request again' }; },
+    async decide(seerTarget = 'primary') {
+      const { action, ids, removeBlacklist } = this.confirmation;
+      await workflowAction(action, ids, { seerTarget, removeBlacklist });
+      this.confirmation = null;
+      await this.load();
+      this.$toast.open({ message: 'Requests updated', type: 'success' });
+    },
     async runJob() { this.running = true; try { await axios.post(`/api/jobs/${this.jobId}/run`); await this.load(1); } finally { this.running = false; } }
   }
 };

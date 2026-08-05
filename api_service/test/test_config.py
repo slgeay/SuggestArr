@@ -833,10 +833,20 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(defaults['SECONDARY_API_URL'], '')
         self.assertEqual(defaults['SECONDARY_TOKEN'], '')
         self.assertEqual(defaults['SECONDARY_LIBRARIES'], [])
+        self.assertEqual(defaults['SECONDARY_SEER_API_URL'], '')
+        self.assertEqual(defaults['SECONDARY_SEER_TOKEN'], '')
+        self.assertEqual(defaults['SEER_PRIMARY_LABEL'], 'Primary')
+        self.assertEqual(defaults['SECONDARY_SEER_LABEL'], 'Secondary')
 
     def test_secondary_media_server_keys_belong_to_services_section(self):
         services = get_config_sections()['services']
         for key in ('SECONDARY_SERVICE', 'SECONDARY_API_URL', 'SECONDARY_TOKEN', 'SECONDARY_LIBRARIES'):
+            self.assertIn(key, services)
+        for key in (
+            'SECONDARY_SEER_API_URL', 'SECONDARY_SEER_TOKEN',
+            'SECONDARY_SEER_USER_NAME', 'SECONDARY_SEER_USER_PSW',
+            'SECONDARY_SEER_SESSION_TOKEN', 'SEER_PRIMARY_LABEL', 'SECONDARY_SEER_LABEL',
+        ):
             self.assertIn(key, services)
 
     def test_secondary_libraries_parsed_from_json_string(self):

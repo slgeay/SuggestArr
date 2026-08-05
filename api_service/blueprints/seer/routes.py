@@ -1,7 +1,14 @@
 from flask import Blueprint, request, jsonify
 import aiohttp
 from api_service.services.seer.seer_client import SeerClient
+from api_service.services.seer.seer_config import (
+    get_seer_target_config,
+    is_secondary_seer_configured,
+    list_seer_targets,
+    normalize_seer_target,
+)
 from api_service.config.logger_manager import LoggerManager
+from api_service.services.config_service import ConfigService
 from api_service.db.database_manager import DatabaseManager
 from api_service.utils.ssrf_guard import validate_url
 
@@ -44,6 +51,68 @@ def get_seer_web_url():
     except Exception as e:
         logger.error(f'Error loading Seer web URL: {str(e)}', exc_info=True)
         return jsonify({'message': 'Error loading Seer URL', 'type': 'error'}), 500
+
+
+@seer_bp.route('/targets', methods=['GET'])
+def get_seer_targets():
+    """
+    Return configured Seer targets for manual request routing and modal links.
+
+    Returns:
+        JSON with ``targets`` — list of {id, label, configured, web_url} dicts.
+    """
+    try:
+        env_vars = ConfigService.get_runtime_config()
+        return jsonify({'targets': list_seer_targets(env_vars)}), 200
+    except Exception as exc:
+        logger.error('Error loading Seer targets: %s', exc, exc_info=True)
+        return jsonify({'message': 'Error loading Seer targets', 'type': 'error'}), 500
+
+
+@seer_bp.route('/test-secondary', methods=['GET', 'POST'])
+async def test_secondary_seer_connection():
+    """
+    Test connectivity to the optional secondary Seer instance.
+
+    Returns:
+        JSON success or error payload.
+    """
+    try:
+        config_data = request.get_json(silent=True) or {}
+        env_vars = ConfigService.get_runtime_config()
+        api_url = (config_data.get('SECONDARY_SEER_API_URL') or env_vars.get('SECONDARY_SEER_API_URL') or '').strip()
+        api_key = (config_data.get('SECONDARY_SEER_TOKEN') or env_vars.get('SECONDARY_SEER_TOKEN') or '').strip()
+        session_token = config_data.get('SECONDARY_SEER_SESSION_TOKEN') or env_vars.get('SECONDARY_SEER_SESSION_TOKEN')
+
+        if not api_url or not api_key:
+            return jsonify({
+                'message': 'Secondary Seer is not configured.',
+                'type': 'error',
+            }), 400
+
+        config = {
+            'api_url': api_url,
+            'token': api_key,
+            'session_token': session_token,
+        }
+
+        try:
+            validate_url(api_url, allow_private=True)
+        except ValueError as exc:
+            return jsonify({'message': str(exc), 'type': 'error'}), 400
+
+        async with SeerClient(
+            api_url=api_url,
+            api_key=api_key,
+            session_token=session_token,
+        ) as seer_client:
+            users = await seer_client.get_all_users()
+            if users is None:
+                return jsonify({'message': 'Failed to connect to secondary Seer', 'type': 'error'}), 404
+            return jsonify({'message': 'Secondary Seer connection successful', 'type': 'success'}), 200
+    except Exception as exc:
+        logger.error('Error testing secondary Seer connection: %s', exc, exc_info=True)
+        return jsonify({'message': f'Error testing secondary Seer: {exc}', 'type': 'error'}), 500
 
 
 @seer_bp.route('/get_users', methods=['GET', 'POST'])

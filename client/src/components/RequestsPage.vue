@@ -466,7 +466,7 @@
                 </div>
 
                 <!-- External Links -->
-                <div v-if="modalTmdbUrl || modalSeerrUrl" class="modal-external-links">
+                <div v-if="modalTmdbUrl || modalSeerrLinks.length" class="modal-external-links">
                   <a
                     v-if="modalTmdbUrl"
                     :href="modalTmdbUrl"
@@ -477,13 +477,14 @@
                     <span>TMDb</span>
                   </a>
                   <a
-                    v-if="modalSeerrUrl"
-                    :href="modalSeerrUrl"
+                    v-for="link in modalSeerrLinks"
+                    :key="link.id"
+                    :href="link.href"
                     target="_blank"
                     rel="noopener noreferrer"
                     class="modal-external-link">
                     <i class="fas fa-paper-plane"></i>
-                    <span>Seerr</span>
+                    <span>{{ link.label }}</span>
                   </a>
                 </div>
 
@@ -584,6 +585,7 @@ import BaseDropdown from '@/components/common/BaseDropdown.vue';
 import { formatDate } from '@/utils/dateUtils.js';
 import { getRequestSourceVisual } from '@/utils/jobTypeVisuals.js';
 import { resolveTmdbId, tmdbUrl, seerrUrl, posterUrl } from '@/utils/mediaLinks.js';
+import { fetchSeerTargets } from '@/composables/useSeerTargets.js';
 import { getAiSearchRequests } from '@/api/api.js';
 import RequestWorkflowPanel from './RequestWorkflowPanel.vue';
 
@@ -620,7 +622,7 @@ export default {
       requestUsers: [],
       showModal: false,
       selectedSource: null,
-      seerBaseUrl: '',
+      seerLinkTargets: [],
       loading: false,
       currentPage: 1,
       totalPages: 1,
@@ -668,8 +670,17 @@ export default {
       return tmdbUrl(this.selectedSource?.media_type, resolveTmdbId(this.selectedSource));
     },
 
-    modalSeerrUrl() {
-      return seerrUrl(this.seerBaseUrl, this.selectedSource?.media_type, resolveTmdbId(this.selectedSource));
+    modalSeerrLinks() {
+      const tmdbId = resolveTmdbId(this.selectedSource);
+      const mediaType = this.selectedSource?.media_type;
+      if (!tmdbId || !mediaType) return [];
+      return this.seerLinkTargets
+        .map((target) => ({
+          id: target.id,
+          label: target.label,
+          href: seerrUrl(target.web_url, mediaType, tmdbId),
+        }))
+        .filter((link) => link.href);
     },
 
     modalSourcePoster() {
@@ -839,12 +850,12 @@ export default {
       }
     },
 
-    async loadSeerBaseUrl() {
+    async loadSeerLinkTargets() {
       try {
-        const { data } = await axios.get('/api/seer/web-url');
-        this.seerBaseUrl = data.url || '';
+        const targets = await fetchSeerTargets();
+        this.seerLinkTargets = targets.filter((target) => target.configured);
       } catch (error) {
-        console.error('Error loading Seer URL:', error);
+        console.error('Error loading Seer targets:', error);
       }
     },
 
@@ -1108,7 +1119,7 @@ export default {
   },
   mounted() {
     this.loadApprovalState();
-    this.loadSeerBaseUrl();
+    this.loadSeerLinkTargets();
     if (this.$route.query.status) {
       this.viewMode = 'all-requests';
       this.requestStatusFilter = this.$route.query.status;
