@@ -18,7 +18,7 @@ config_bp = Blueprint('config', __name__)
 # Keys whose plaintext values must never appear in API responses.
 _SECRET_KEYS = frozenset({
     'TMDB_API_KEY', 'OMDB_API_KEY',
-    'PLEX_TOKEN', 'JELLYFIN_TOKEN',
+    'PLEX_TOKEN', 'JELLYFIN_TOKEN', 'SECONDARY_TOKEN',
     'SEER_TOKEN', 'SEER_USER_PSW', 'SEER_SESSION_TOKEN',
     'DB_PASSWORD',
     'OPENAI_API_KEY',

@@ -17,6 +17,7 @@ from api_service.services.filter_normalization import normalize_filters
 from api_service.services.jellyfin.jellyfin_client import JellyfinClient
 from api_service.services.seer.seer_client import SeerClient
 from api_service.services.plex.plex_client import PlexClient
+from api_service.services.secondary_library import load_secondary_library_sets
 from api_service.services.tmdb.tmdb_client import TMDbClient
 
 
@@ -448,6 +449,8 @@ class RecommendationAutomation:
         """Initialize Jellyfin handler."""
         self.logger.info("Initializing Jellyfin client")
 
+        secondary_content_sets = await load_secondary_library_sets(self.env_vars, max_content)
+
         jellyfin_libraries_raw = self.env_vars.get('JELLYFIN_LIBRARIES')
         jellyfin_libraries = jellyfin_libraries_raw if isinstance(jellyfin_libraries_raw, list) else []
 
@@ -479,6 +482,7 @@ class RecommendationAutomation:
                 use_as_exclusion=trakt_use_as_exclusion,
             ),
             max_content=max_content,
+            secondary_content_sets=secondary_content_sets,
         )
         self.logger.info("Jellyfin handler initialized")
 
@@ -494,6 +498,8 @@ class RecommendationAutomation:
     ):
         """Initialize Plex handler."""
         self.logger.info("Initializing Plex client")
+
+        secondary_content_sets = await load_secondary_library_sets(self.env_vars, max_content)
 
         plex_libraries_raw = self.env_vars.get('PLEX_LIBRARIES')
         plex_libraries = plex_libraries_raw if isinstance(plex_libraries_raw, list) else []
@@ -528,6 +534,7 @@ class RecommendationAutomation:
             ),
             selected_users=selected_users,
             max_content=max_content,
+            secondary_content_sets=secondary_content_sets,
         )
         self.logger.info("Plex handler initialized")
 

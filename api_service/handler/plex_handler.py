@@ -16,7 +16,7 @@ def to_ascii(value):
     return unicodedata.normalize('NFKD', value)
 
 class PlexHandler(BaseMediaHandler):
-    def __init__(self, plex_client: PlexClient, seer_client, tmdb_client, logger, max_similar_movie, max_similar_tv, library_anime_map=None, use_llm=None, request_delay=0, honor_seer_discovery=False, seer_discovered_ids=None, dry_run=False, max_total_requests=None, trakt_augmentor=None, selected_users=None, max_content=10):
+    def __init__(self, plex_client: PlexClient, seer_client, tmdb_client, logger, max_similar_movie, max_similar_tv, library_anime_map=None, use_llm=None, request_delay=0, honor_seer_discovery=False, seer_discovered_ids=None, dry_run=False, max_total_requests=None, trakt_augmentor=None, selected_users=None, max_content=10, secondary_content_sets=None):
         """
         Initialize PlexHandler with clients and parameters.
         :param plex_client: Plex API client
@@ -31,6 +31,7 @@ class PlexHandler(BaseMediaHandler):
         :param dry_run: If True, simulate requests without touching download clients.
         :param max_total_requests: Max number of items to request for the whole run.
         :param max_content: Max seeds to process after merging Trakt + Plex sources.
+        :param secondary_content_sets: TMDB ID sets from an optional secondary media server.
         """
         super().__init__(
             seer_client=seer_client,
@@ -47,10 +48,12 @@ class PlexHandler(BaseMediaHandler):
             max_total_requests=max_total_requests,
             trakt_augmentor=trakt_augmentor,
             max_content=max_content,
+            secondary_content_sets=secondary_content_sets,
         )
         self.plex_client = plex_client
         self.selected_users = selected_users or []
         self._populate_existing_content_sets()
+        self.merge_extra_content_sets(self.secondary_content_sets)
     
     def _populate_existing_content_sets(self):
         """Extract existing content from Plex client."""

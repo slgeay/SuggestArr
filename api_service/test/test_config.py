@@ -40,6 +40,10 @@ class TestConfig(unittest.TestCase):
         "PLEX_CLIENT_ID": "mock-uuid-1234",
         "PLEX_LIBRARIES": ["1", "2"],
         "PLEX_TOKEN": "7h349fh349fj3",
+        "SECONDARY_SERVICE": "jellyfin",
+        "SECONDARY_API_URL": "https://second.totally.legit.url.tld",
+        "SECONDARY_TOKEN": "secondary-token",
+        "SECONDARY_LIBRARIES": [{"id": "lib-1", "name": "Movies"}],
         "SEARCH_SIZE": 20,
         "SEER_API_URL": "https://overseerr.totally.legit.url.tld",
         "SEER_SESSION_TOKEN": "s%3A1Db_7DWVJ7nU1R_KsGRQWFLxbisV2m4q.RTKKKBwhMWdMJ4VJNrAIngNFmztqnywP5TkctRYB%2B6M",
@@ -818,6 +822,58 @@ class TestConfig(unittest.TestCase):
         # lines 278-280: unknown section → ValueError
         with self.assertRaises(ValueError):
             save_config_section('nonexistent_section', {})
+
+    # ------------------------------------------------------------------
+    # Secondary media server
+    # ------------------------------------------------------------------
+
+    def test_secondary_media_server_defaults_are_empty(self):
+        defaults = get_config_values()
+        self.assertEqual(defaults['SECONDARY_SERVICE'], '')
+        self.assertEqual(defaults['SECONDARY_API_URL'], '')
+        self.assertEqual(defaults['SECONDARY_TOKEN'], '')
+        self.assertEqual(defaults['SECONDARY_LIBRARIES'], [])
+
+    def test_secondary_media_server_keys_belong_to_services_section(self):
+        services = get_config_sections()['services']
+        for key in ('SECONDARY_SERVICE', 'SECONDARY_API_URL', 'SECONDARY_TOKEN', 'SECONDARY_LIBRARIES'):
+            self.assertIn(key, services)
+
+    def test_secondary_libraries_parsed_from_json_string(self):
+        yaml.safe_dump(
+            {'SECONDARY_LIBRARIES': '[{"id": "lib-1", "name": "Movies"}]'},
+            open(self._tmp.name, 'w'),
+        )
+        config = load_env_vars(force_reload=True)
+        self.assertEqual(config['SECONDARY_LIBRARIES'], [{'id': 'lib-1', 'name': 'Movies'}])
+
+    def test_clearing_secondary_media_server_removes_stored_values(self):
+        config = {key: val() for key, val in get_default_values().items()}
+        config.update({
+            'SECONDARY_SERVICE': 'plex',
+            'SECONDARY_API_URL': 'http://second-plex:32400',
+            'SECONDARY_TOKEN': 'tok',
+            'SECONDARY_LIBRARIES': [{'id': '1', 'name': 'Films'}],
+        })
+        save_config_section('services', config)
+        self.assertEqual(load_env_vars(force_reload=True)['SECONDARY_SERVICE'], 'plex')
+
+        save_config_section('services', {
+            'SECONDARY_SERVICE': '',
+            'SECONDARY_API_URL': '',
+            'SECONDARY_TOKEN': '',
+            'SECONDARY_LIBRARIES': [],
+        })
+
+        with open(self._tmp.name, encoding='utf-8') as file:
+            stored = yaml.safe_load(file) or {}
+        self.assertNotIn('SECONDARY_SERVICE', stored)
+        self.assertNotIn('SECONDARY_API_URL', stored)
+        self.assertNotIn('SECONDARY_TOKEN', stored)
+
+        cleared = load_env_vars(force_reload=True)
+        self.assertEqual(cleared['SECONDARY_SERVICE'], '')
+        self.assertEqual(cleared['SECONDARY_LIBRARIES'], [])
 
     # ------------------------------------------------------------------
     # is_setup_complete

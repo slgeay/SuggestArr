@@ -571,6 +571,80 @@ def test_plex_handler_normalizes_existing_content_tmdb_ids(test_logger):
     assert handler.existing_content_sets["tv"] == {"1399"}
 
 
+def test_plex_handler_merges_secondary_content_sets(test_logger):
+    plex_client = FakePlexClient()
+    plex_client.existing_content = {"movie": [{"tmdb_id": "808"}]}
+
+    handler = PlexHandler(
+        plex_client=plex_client,
+        seer_client=FakeSeerClient(),
+        tmdb_client=FakeTMDbClient(),
+        logger=test_logger,
+        max_similar_movie=1,
+        max_similar_tv=1,
+        dry_run=True,
+        secondary_content_sets={"movie": {"550"}, "tv": {"1399"}},
+    )
+
+    assert handler.existing_content_sets["movie"] == {"808", "550"}
+    assert handler.existing_content_sets["tv"] == {"1399"}
+
+
+def test_jellyfin_handler_merges_secondary_content_sets(test_logger):
+    jellyfin_client = FakeJellyfinClient()
+    jellyfin_client.existing_content = {"movie": [{"tmdb_id": "10"}]}
+
+    handler = JellyfinHandler(
+        jellyfin_client=jellyfin_client,
+        seer_client=FakeSeerClient(),
+        tmdb_client=FakeTMDbClient(),
+        logger=test_logger,
+        max_similar_movie=1,
+        max_similar_tv=1,
+        selected_users=[deepcopy(USER)],
+        dry_run=True,
+        secondary_content_sets={"movie": {"550"}},
+    )
+
+    assert handler.existing_content_sets["movie"] == {"10", "550"}
+
+
+@pytest.mark.asyncio
+async def test_jellyfin_handler_skips_content_owned_only_by_secondary_server(test_logger):
+    """A title present only on the secondary server must not be requested."""
+    seer_client = FakeSeerClient()
+    seer_client.check_already_downloaded = AsyncMock(
+        side_effect=lambda tmdb_id, media_type, local_content=None:
+            str(tmdb_id) in (local_content or {}).get(media_type, set())
+    )
+
+    # Blade Runner 2049 (TMDB 111) is the movie the fake LLM recommends for Jellyfin.
+    handler = JellyfinHandler(
+        jellyfin_client=FakeJellyfinClient(),
+        seer_client=seer_client,
+        tmdb_client=FakeTMDbClient(),
+        logger=test_logger,
+        max_similar_movie=1,
+        max_similar_tv=1,
+        selected_users=[deepcopy(USER)],
+        use_llm=True,
+        dry_run=True,
+        secondary_content_sets={"movie": {"111"}},
+    )
+    llm_mock = make_llm_side_effect()
+
+    with patch("api_service.handler.base_handler.get_recommendations_from_history", llm_mock):
+        await handler.process_recent_items()
+
+    movies = [item for item in handler.dry_run_items if item["media_type"] == "movie"]
+    assert [item["tmdb_id"] for item in movies] == [111]
+    assert movies[0]["already_downloaded"] is True
+    assert movies[0]["would_request"] is False
+
+    shows = [item for item in handler.dry_run_items if item["media_type"] == "tv"]
+    assert shows and all(item["already_downloaded"] is False for item in shows)
+
+
 @pytest.mark.asyncio
 async def test_jellyfin_handler_process_recent_items_runs_real_llm_flow_without_type_error(caplog, test_logger):
     handler = JellyfinHandler(

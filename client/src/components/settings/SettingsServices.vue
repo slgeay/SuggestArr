@@ -349,6 +349,94 @@
             </div>
           </div>
         </div>
+
+        <!-- Secondary media server (optional, dashboard only) -->
+        <div v-if="!wizardMode" class="collapsible-section">
+          <button class="collapsible-toggle" @click="secondaryExpanded = !secondaryExpanded">
+            <i class="fas fa-chevron-right toggle-arrow" :class="{ expanded: secondaryExpanded }"></i>
+            <span>Secondary Media Server</span>
+            <span class="toggle-summary" v-if="!secondaryExpanded">{{ secondarySummary }}</span>
+          </button>
+          <div class="collapsible-content" v-show="secondaryExpanded">
+            <p class="advanced-block-desc">
+              Optional. Content already available on this server is never requested again.
+              Its watch history and users are not used for recommendations.
+            </p>
+
+            <div class="form-group">
+              <label for="secondaryService">Server Type</label>
+              <BaseDropdown
+                v-model="localConfig.SECONDARY_SERVICE"
+                :options="secondaryServiceOptions"
+                placeholder="None"
+                :disabled="isLoading"
+                id="secondaryService"
+                @change="onSecondaryServiceChange"
+              />
+            </div>
+
+            <template v-if="localConfig.SECONDARY_SERVICE">
+              <div class="form-group">
+                <label for="secondaryApiUrl">{{ secondaryServiceLabel }} URL</label>
+                <input
+                  id="secondaryApiUrl"
+                  v-model="localConfig.SECONDARY_API_URL"
+                  type="url"
+                  :placeholder="secondaryUrlPlaceholder"
+                  class="form-control"
+                  :disabled="isLoading"
+                />
+              </div>
+              <div class="form-group">
+                <label for="secondaryToken">{{ localConfig.SECONDARY_SERVICE === 'plex' ? 'Plex Token' : 'API Token' }}</label>
+                <div class="input-group">
+                  <input
+                    id="secondaryToken"
+                    v-model="localConfig.SECONDARY_TOKEN"
+                    :type="showSecondaryToken ? 'text' : 'password'"
+                    placeholder="Enter the token for this server"
+                    class="form-control"
+                    :disabled="isLoading"
+                  />
+                  <button @click="showSecondaryToken = !showSecondaryToken" type="button" class="btn btn-outline btn-sm" :disabled="isLoading">
+                    <i :class="showSecondaryToken ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+                  </button>
+                </div>
+              </div>
+              <button
+                @click="testAndFetchSecondary"
+                class="btn btn-outline btn-block"
+                :disabled="isLoading || !localConfig.SECONDARY_API_URL || !localConfig.SECONDARY_TOKEN || secondaryFetching"
+              >
+                <i v-if="secondaryFetching" class="fas fa-spinner fa-spin"></i>
+                <i v-else-if="secondaryConnected" class="fas fa-check"></i>
+                <i v-else class="fas fa-plug"></i>
+                {{ secondaryFetching ? 'Connecting...' : (secondaryConnected ? 'Connected' : 'Test & Load') }}
+              </button>
+
+              <div v-if="secondaryConnected" class="advanced-block">
+                <div class="advanced-block-header">
+                  <span class="advanced-block-title"><i class="fas fa-photo-video"></i> Libraries</span>
+                  <button v-if="selectedSecondaryLibraries.length > 0" @click="clearSecondaryLibraries" class="text-btn">Clear all</button>
+                </div>
+                <p class="advanced-block-desc">Select the libraries to check for already-owned content.</p>
+                <div v-if="secondaryLibraryOptions.length > 0" class="chip-list">
+                  <div
+                    v-for="lib in secondaryLibraryOptions"
+                    :key="lib._id"
+                    class="chip"
+                    :class="{ active: isSecondaryLibSelected(lib._id) }"
+                    @click="toggleSecondaryLibrary(lib)"
+                  >
+                    <i :class="getLibraryIcon(lib._type)"></i>
+                    <span>{{ lib._name }}</span>
+                  </div>
+                </div>
+                <p v-else class="no-items">No libraries found</p>
+              </div>
+            </template>
+          </div>
+        </div>
       </div>
 
       <!-- Trakt -->
@@ -632,6 +720,7 @@ export default {
       showOmdbKey: false,
       showPlexToken: false,
       showJellyfinToken: false,
+      showSecondaryToken: false,
       showSeerToken: false,
       showTraktClientSecret: false,
       // Wizard-mode self-contained TMDB test state
@@ -644,7 +733,14 @@ export default {
       // Collapsible sections
       mediaServerAdvancedExpanded: false,
       seerAdvancedExpanded: false,
+      secondaryExpanded: false,
       serviceOptions: [
+        { value: 'plex', label: 'Plex' },
+        { value: 'jellyfin', label: 'Jellyfin' },
+        { value: 'emby', label: 'Emby' }
+      ],
+      secondaryServiceOptions: [
+        { value: '', label: 'None' },
         { value: 'plex', label: 'Plex' },
         { value: 'jellyfin', label: 'Jellyfin' },
         { value: 'emby', label: 'Emby' }
@@ -687,6 +783,11 @@ export default {
       plexUsers: [],
       selectedPlexLibraries: [],
       selectedPlexUsers: [],
+      // Secondary media server (presence checks only)
+      secondaryFetching: false,
+      secondaryConnected: false,
+      secondaryLibraries: [],
+      selectedSecondaryLibraries: [],
       // Plex OAuth (wizard mode)
       plexOAuthLoading: false,
       plexOAuthLoggedIn: false,
@@ -724,6 +825,25 @@ export default {
     currentSelectedUsers() {
       if (this.localConfig.SELECTED_SERVICE === 'plex') return this.selectedPlexUsers;
       return this.selectedJellyfinUsers;
+    },
+    // Secondary media server
+    secondaryServiceLabel() {
+      const option = this.secondaryServiceOptions.find(o => o.value === this.localConfig.SECONDARY_SERVICE);
+      return option ? option.label : '';
+    },
+    secondaryUrlPlaceholder() {
+      return this.localConfig.SECONDARY_SERVICE === 'plex' ? 'http://localhost:32400' : 'http://localhost:8096';
+    },
+    secondarySummary() {
+      if (!this.localConfig.SECONDARY_SERVICE) return 'Not configured';
+      const count = (this.localConfig.SECONDARY_LIBRARIES || []).length;
+      return `${this.secondaryServiceLabel}, ${count} libraries`;
+    },
+    secondaryLibraryOptions() {
+      if (this.localConfig.SECONDARY_SERVICE === 'plex') {
+        return this.secondaryLibraries.map(lib => ({ _id: lib.key, _name: lib.title, _type: lib.type }));
+      }
+      return this.secondaryLibraries.map(lib => ({ _id: lib.ItemId, _name: lib.Name, _type: lib.CollectionType }));
     },
     // Plex OAuth: flattened list of server connections for the dropdown
     plexOAuthConnectionOptions() {
@@ -887,6 +1007,7 @@ export default {
         this.localConfig = { ...newConfig };
         this.originalConfig = { ...newConfig };
         this.loadSavedSeerState();
+        this.loadSavedSecondaryLibraries();
       },
     },
     // Wizard-mode validation signals
@@ -967,6 +1088,11 @@ export default {
 
       if (this.localConfig.OMDB_API_KEY) {
         tasks.push(this.testOmdbConnection(silent));
+      }
+
+      if (!this.wizardMode && this.localConfig.SECONDARY_SERVICE &&
+          this.localConfig.SECONDARY_API_URL && this.localConfig.SECONDARY_TOKEN) {
+        tasks.push(this.testAndFetchSecondary(true));
       }
 
       Promise.allSettled(tasks);
@@ -1224,6 +1350,81 @@ export default {
       }
     },
 
+    // Secondary media server (libraries only; no users or watch history)
+    onSecondaryServiceChange() {
+      this.secondaryConnected = false;
+      this.secondaryLibraries = [];
+      this.selectedSecondaryLibraries = [];
+      this.localConfig.SECONDARY_LIBRARIES = [];
+      if (!this.localConfig.SECONDARY_SERVICE) {
+        this.localConfig.SECONDARY_API_URL = '';
+        this.localConfig.SECONDARY_TOKEN = '';
+      }
+    },
+
+    async testAndFetchSecondary(silent = false) {
+      const service = this.localConfig.SECONDARY_SERVICE;
+      const apiUrl = (this.localConfig.SECONDARY_API_URL || '').trim();
+      const token = (this.localConfig.SECONDARY_TOKEN || '').trim();
+      if (!service || !apiUrl || !token) return;
+
+      try {
+        new URL(apiUrl.startsWith('http') ? apiUrl : `http://${apiUrl}`);
+      } catch (e) {
+        if (!silent) this._notifyError('Invalid URL format.', { position: 'top-right', duration: 4000 });
+        return;
+      }
+
+      this.secondaryFetching = true;
+      this.secondaryConnected = false;
+      try {
+        const libRes = service === 'plex'
+          ? await fetchPlexLibraries({ PLEX_API_URL: apiUrl, PLEX_TOKEN: token })
+          : await fetchJellyfinLibraries({ JELLYFIN_API_URL: apiUrl, JELLYFIN_TOKEN: token });
+        this.secondaryLibraries = libRes.data.items || [];
+        this.secondaryConnected = true;
+        this.loadSavedSecondaryLibraries();
+        if (!silent && this.$toast) {
+          this.$toast.success(`Connected! Found ${this.secondaryLibraries.length} libraries.`, { position: 'top-right', duration: 3000 });
+        }
+      } catch (error) {
+        console.error('Secondary media server connection failed:', error);
+        this.secondaryConnected = false;
+        this.secondaryLibraries = [];
+        if (!silent) {
+          const serverMsg = error?.response?.data?.message;
+          this._notifyError(serverMsg
+            ? `Failed to connect: ${serverMsg}`
+            : 'Failed to connect. Check the secondary server URL and token.');
+        }
+      } finally {
+        this.secondaryFetching = false;
+      }
+    },
+
+    toggleSecondaryLibrary(lib) {
+      const idx = this.selectedSecondaryLibraries.findIndex(l => String(l.id) === String(lib._id));
+      if (idx >= 0) {
+        this.selectedSecondaryLibraries.splice(idx, 1);
+      } else {
+        this.selectedSecondaryLibraries.push({ id: lib._id, name: lib._name });
+      }
+      this.localConfig.SECONDARY_LIBRARIES = [...this.selectedSecondaryLibraries];
+    },
+    isSecondaryLibSelected(id) {
+      return this.selectedSecondaryLibraries.some(l => String(l.id) === String(id));
+    },
+    clearSecondaryLibraries() {
+      this.selectedSecondaryLibraries = [];
+      this.localConfig.SECONDARY_LIBRARIES = [];
+    },
+    loadSavedSecondaryLibraries() {
+      const saved = this.localConfig.SECONDARY_LIBRARIES || [];
+      this.selectedSecondaryLibraries = saved
+        .filter(lib => typeof lib === 'object' && lib.id)
+        .map(lib => ({ id: lib.id, name: lib.name }));
+    },
+
     // Jellyfin library/user selection
     toggleJellyfinLibrary(lib) {
       const idx = this.selectedJellyfinLibraries.findIndex(l => l.id === lib.ItemId);
@@ -1473,6 +1674,12 @@ export default {
           });
         }
         Object.assign(dataToSave, {
+          SECONDARY_SERVICE: this.localConfig.SECONDARY_SERVICE || '',
+          SECONDARY_API_URL: this.localConfig.SECONDARY_SERVICE ? (this.localConfig.SECONDARY_API_URL || '') : '',
+          SECONDARY_TOKEN: this.localConfig.SECONDARY_SERVICE ? (this._secretValue('SECONDARY_TOKEN') || '') : '',
+          SECONDARY_LIBRARIES: this.localConfig.SECONDARY_SERVICE ? (this.localConfig.SECONDARY_LIBRARIES || []) : [],
+        });
+        Object.assign(dataToSave, {
           SEER_API_URL: this.localConfig.SEER_API_URL,
           SEER_TOKEN: this._secretValue('SEER_TOKEN'),
           SEER_USER_NAME: this.localConfig.SEER_USER_NAME || null,
@@ -1493,6 +1700,7 @@ export default {
       const defaults = {
         TMDB_API_KEY: '', OMDB_API_KEY: '', SELECTED_SERVICE: '', PLEX_TOKEN: '', PLEX_API_URL: '', PLEX_LIBRARIES: [],
         JELLYFIN_API_URL: '', JELLYFIN_TOKEN: '', JELLYFIN_LIBRARIES: [],
+        SECONDARY_SERVICE: '', SECONDARY_API_URL: '', SECONDARY_TOKEN: '', SECONDARY_LIBRARIES: [],
         TRAKT_CLIENT_ID: '', TRAKT_CLIENT_SECRET: '',
         SEER_API_URL: '', SEER_TOKEN: '', SEER_USER_NAME: null, SEER_USER_PSW: null,
         SEER_SESSION_TOKEN: null, SEER_ANIME_PROFILE_CONFIG: {}, SEER_REQUEST_DELAY: 2, SELECTED_USERS: [],
@@ -1506,6 +1714,7 @@ export default {
         this.selectedJellyfinLibraries = []; this.selectedJellyfinUsers = [];
         this.plexConnected = false; this.plexLibraries = []; this.plexUsers = [];
         this.selectedPlexLibraries = []; this.selectedPlexUsers = [];
+        this.secondaryConnected = false; this.secondaryLibraries = []; this.selectedSecondaryLibraries = [];
         await this.saveSettings();
       }
     },
