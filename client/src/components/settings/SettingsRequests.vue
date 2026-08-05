@@ -104,9 +104,26 @@
               <span class="badge-media-compact">
                 <i :class="request.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i>
               </span>
-              <div v-if="request._pending" class="pending-card-actions" @click.stop>
+              <div v-if="request._pending" class="pending-card-actions" :class="{ 'pending-card-actions--dual-seer': hasDualSeerConfig }" @click.stop>
                 <template v-if="confirmRejectId === request.id"><button type="button" class="poster-action pending-cancel" aria-label="Cancel rejection" @click="confirmRejectId = null"><i class="fas fa-undo"></i></button><button type="button" class="poster-action pending-reject" :disabled="actionLoadingId === request.id" aria-label="Confirm rejection" @click="decidePending('reject', request.id)"><i class="fas fa-check"></i></button></template>
-                <template v-else><button type="button" class="poster-action pending-approve" :disabled="actionLoadingId === request.id" aria-label="Approve request" @click="decidePending('approve', request.id)"><i class="fas fa-check"></i></button><button type="button" class="poster-action pending-reject" :disabled="actionLoadingId === request.id" aria-label="Reject request" @click="confirmRejectId = request.id"><i class="fas fa-times"></i></button></template>
+                <template v-else>
+                  <template v-if="hasDualSeerConfig">
+                    <button
+                      v-for="(target, index) in seerTargets"
+                      :key="target.id"
+                      type="button"
+                      class="poster-action pending-approve poster-action--labeled"
+                      :disabled="actionLoadingId === request.id"
+                      :aria-label="`Approve on ${target.label}`"
+                      :title="`Approve on ${target.label}`"
+                      @click="decidePending('approve', request.id, target.id)"
+                    >
+                      <span class="poster-action-label">{{ index + 1 }}</span>
+                    </button>
+                  </template>
+                  <button v-else type="button" class="poster-action pending-approve" :disabled="actionLoadingId === request.id" aria-label="Approve request" @click="decidePending('approve', request.id)"><i class="fas fa-check"></i></button>
+                  <button type="button" class="poster-action pending-reject" :disabled="actionLoadingId === request.id" aria-label="Reject request" @click="confirmRejectId = request.id"><i class="fas fa-times"></i></button>
+                </template>
               </div>
             </div>
 
@@ -144,7 +161,23 @@
             <div class="modal-details-section">
               <h2 class="modal-title">{{ selectedRequest.title }}</h2>
               <div class="badge-container"><span class="badge badge-media"><i :class="selectedRequest.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i> {{ selectedRequest.media_type?.toUpperCase() }}</span><span class="badge badge-rating"><i class="fas fa-star"></i> {{ selectedRequest.rating || 'N/A' }}</span><span v-if="selectedRequest.release_date" class="badge badge-date"><i class="fas fa-calendar"></i> {{ selectedRequest.release_date }}</span></div>
-              <div v-if="selectedRequest.source_title" class="source-link-modal"><i class="fas fa-link"></i><span>Requested from: <strong>{{ selectedRequest.source_title }}</strong></span></div>
+              <div v-if="modalTmdbUrl || modalSeerrLinks.length" class="modal-external-links">
+                <a v-if="modalTmdbUrl" :href="modalTmdbUrl" target="_blank" rel="noopener noreferrer" class="modal-external-link"><i class="fas fa-database"></i><span>TMDb</span></a>
+                <a
+                  v-for="link in modalSeerrLinks"
+                  :key="link.id"
+                  :href="link.href"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="modal-external-link"
+                ><i class="fas fa-paper-plane"></i><span>{{ link.label }}</span></a>
+              </div>
+              <div v-if="selectedRequest.source_title && modalSourcePoster" class="modal-source-card">
+                <img :src="modalSourcePoster" :alt="selectedRequest.source_title" class="modal-source-poster" />
+                <div class="modal-source-info"><span class="modal-source-label">Similar to</span><strong class="modal-source-title">{{ selectedRequest.source_title }}</strong></div>
+              </div>
+              <div v-else-if="selectedRequest.source_title" class="source-link-modal"><i class="fas fa-link"></i><span>Similar to: <strong>{{ selectedRequest.source_title }}</strong></span></div>
+              <div v-if="selectedRequest.job_name" class="source-link-modal"><i class="fas fa-briefcase"></i><span>Job: <strong>{{ selectedRequest.job_name }}</strong></span></div>
               <div v-if="selectedRequest.user_name || selectedRequest.user_id" class="source-link-modal"><i class="fas fa-user"></i><span>Requested for: <strong>{{ selectedRequest.user_name || selectedRequest.user_id }}</strong></span></div>
               <div class="modal-separator"></div>
               <div class="modal-section"><h3 class="modal-section-title"><i class="fas fa-align-left"></i> Overview</h3><p class="modal-overview">{{ selectedRequest.overview || 'No overview available.' }}</p></div>
@@ -158,7 +191,10 @@
 
 <script>
 import axios from 'axios';
+import { workflowAction } from '@/api/api';
+import { fetchSeerTargets, hasDualSeer } from '@/composables/useSeerTargets.js';
 import { formatDate } from '@/utils/dateUtils.js';
+import { resolveTmdbId, tmdbUrl, seerrUrl, posterUrl } from '@/utils/mediaLinks.js';
 import '@/assets/styles/requestsPage.css';
 
 export default {
@@ -178,6 +214,9 @@ export default {
       actionLoadingId: null,
       approvalEnabled: false,
       selectedRequest: null,
+      seerLinkTargets: [],
+      hasDualSeerConfig: false,
+      seerTargets: [],
       totalRequests: 0,
       loading: false,
       activeFilter: 'all',
@@ -195,15 +234,48 @@ export default {
         return requests.slice(0, 20);
       }
       return requests.filter(req => req.media_type === this.activeFilter).slice(0, 20);
+    },
+
+    modalTmdbUrl() {
+      return tmdbUrl(this.selectedRequest?.media_type, resolveTmdbId(this.selectedRequest));
+    },
+
+    modalSeerrLinks() {
+      const tmdbId = resolveTmdbId(this.selectedRequest);
+      const mediaType = this.selectedRequest?.media_type;
+      if (!tmdbId || !mediaType) return [];
+      return this.seerLinkTargets
+        .map((target) => ({
+          id: target.id,
+          label: target.label,
+          href: seerrUrl(target.web_url, mediaType, tmdbId),
+        }))
+        .filter((link) => link.href);
+    },
+
+    modalSourcePoster() {
+      return posterUrl(this.selectedRequest?.source_poster_path);
     }
   },
   mounted() {
     this.loadStats();
     this.loadRecentRequests();
     this.loadApprovalState();
+    this.loadSeerLinkTargets();
   },
   methods: {
     formatDate,
+
+    async loadSeerLinkTargets() {
+      try {
+        const targets = await fetchSeerTargets();
+        this.seerLinkTargets = targets.filter((target) => target.configured);
+        this.seerTargets = this.seerLinkTargets;
+        this.hasDualSeerConfig = hasDualSeer(targets);
+      } catch (error) {
+        console.error('Error loading Seer targets:', error);
+      }
+    },
 
     async loadStats() {
       try {
@@ -228,7 +300,8 @@ export default {
         const allRequests = response.data.data.flatMap(source =>
           source.requests.map(req => ({
             ...req,
-            source_title: source.source_title
+            source_title: source.source_title,
+            source_poster_path: source.source_poster_path
           }))
         );
 
@@ -250,7 +323,7 @@ export default {
     async loadPendingRequests() {
       try {
         const { data } = await axios.get('/api/automation/requests/workflow', { params: { status: 'awaiting_approval', page: 1, per_page: 20 } });
-        this.pendingRequests = (data.items || []).map(item => ({ ...item, _pending: true, _key: `pending-${item.id}`, requested_at: item.created_at, source_title: item.name, poster_path: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null }));
+        this.pendingRequests = (data.items || []).map(item => ({ ...item, _pending: true, _key: `pending-${item.id}`, requested_at: item.created_at, job_name: item.name, poster_path: posterUrl(item.poster_path, 'w500') }));
         this.pendingTotal = data.total || 0;
       } catch (error) {
         console.error('Error loading pending requests:', error);
@@ -270,10 +343,10 @@ export default {
       }
     },
 
-    async decidePending(action, id) {
+    async decidePending(action, id, seerTarget = 'primary') {
       this.actionLoadingId = id;
       try {
-        await axios.post(`/api/automation/requests/workflow/${action}`, { ids: [id] });
+        await workflowAction(action, [id], { seerTarget });
         this.confirmRejectId = null;
         await this.loadPendingRequests();
         this.$toast.open({ message: action === 'approve' ? 'Request queued for Seer' : 'Request rejected', type: 'success' });
@@ -315,8 +388,11 @@ export default {
 
 .requests-stats-header.has-approval { grid-template-columns: repeat(5, 1fr); }
 
-.pending-card-actions { position: absolute; right: var(--spacing-sm); bottom: var(--spacing-sm); display: flex; gap: var(--spacing-sm); z-index: 3; }
+.pending-card-actions { position: absolute; right: var(--spacing-sm); bottom: var(--spacing-sm); display: flex; gap: var(--spacing-sm); z-index: 3; align-items: flex-end; }
+.pending-card-actions--dual-seer { flex-direction: column; align-items: stretch; max-width: calc(100% - var(--spacing-md)); }
 .poster-action { display: grid; place-items: center; width: var(--btn-height-md); height: var(--btn-height-md); padding: 0; border: 1px solid var(--color-border-medium); border-radius: var(--radius-full); color: var(--color-text-primary); cursor: pointer; box-shadow: var(--shadow-md); }
+.poster-action--labeled { width: auto; min-width: var(--btn-height-md); min-height: var(--btn-height-md); padding: 0 var(--spacing-xs); border-radius: var(--radius-md); display: inline-flex; flex-direction: row; align-items: center; justify-content: center; font-size: var(--font-size-sm); font-weight: var(--font-weight-bold); white-space: nowrap; }
+.poster-action-label { line-height: 1; min-width: 1ch; text-align: center; }
 .pending-approve { color: var(--color-text-primary); background: var(--color-success); }
 .pending-reject { color: var(--color-text-primary); background: var(--color-error); }
 .pending-cancel { background: var(--surface-elevated-solid); }

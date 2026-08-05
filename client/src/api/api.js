@@ -30,6 +30,15 @@ export const testSeerApi = (payload = null) => {
     return axios.get('/api/seer/get_users');
 };
 
+export const fetchSeerTargets = () => axios.get('/api/seer/targets');
+
+export const testSecondarySeerApi = (payload = null) => {
+    if (payload) {
+        return axios.post('/api/seer/test-secondary', payload);
+    }
+    return axios.get('/api/seer/test-secondary');
+};
+
 // Function to authenticate a user in Seer
 export const authenticateUser = (url, token, userName, password) => {
     return axios.post('/api/seer/login', {
@@ -104,13 +113,29 @@ export const getAiSearchRequests = (page = 1, perPage = 12, sortBy = 'date-desc'
 };
 
 // AI Search: request a specific TMDB item via Seer
-export const aiSearchRequest = (tmdbId, mediaType, rationale = '', metadata = {}, searchQuery = '') => {
+export const aiSearchRequest = (
+    tmdbId,
+    mediaType,
+    rationale = '',
+    metadata = {},
+    searchQuery = '',
+    seerTarget = 'primary',
+) => {
     return axios.post('/api/ai-search/request', {
         tmdb_id: tmdbId,
         media_type: mediaType,
         rationale,
         metadata,
         search_query: searchQuery,
+        seer_target: seerTarget,
+    });
+};
+
+export const workflowAction = (action, ids, { seerTarget = 'primary', removeBlacklist = false } = {}) => {
+    return axios.post(`/api/automation/requests/workflow/${action}`, {
+        ids,
+        seer_target: seerTarget,
+        remove_blacklist: removeBlacklist,
     });
 };
 

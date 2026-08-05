@@ -1,3 +1,4 @@
+import json
 import sqlite3
 
 from api_service.db.components.request_queue_mixin import RequestQueueMixin
@@ -67,6 +68,20 @@ def test_reject_and_blacklist_are_separate_actions():
     assert connection.execute("SELECT COUNT(*) FROM suggestion_blacklist").fetchone()[0] == 0
     assert queue.decide_suggestions([2], 7, 7, False, blacklist=True) == 1
     assert connection.execute("SELECT tmdb_id FROM suggestion_blacklist").fetchone()[0] == '20'
+
+
+def test_approve_merges_seer_target_into_payload():
+    connection = sqlite3.connect(":memory:")
+    connection.executescript("""
+        CREATE TABLE pending_requests (id INTEGER PRIMARY KEY, tmdb_id TEXT, media_type TEXT,
+            status TEXT, owner_id INTEGER, decided_by INTEGER, decided_at TIMESTAMP, payload TEXT);
+        INSERT INTO pending_requests VALUES (1,'10','movie','awaiting_approval',7,NULL,NULL,'{"mediaType":"movie","mediaId":10}');
+    """)
+    queue = Queue(connection)
+    assert queue.decide_suggestions([1], 7, 7, True, seer_target='secondary') == 1
+    payload = json.loads(connection.execute("SELECT payload FROM pending_requests WHERE id=1").fetchone()[0])
+    assert payload['_seer_target'] == 'secondary'
+    assert connection.execute("SELECT status FROM pending_requests WHERE id=1").fetchone()[0] == 'queued'
 
 
 def test_mysql_blacklist_uses_bounded_primary_key_columns():

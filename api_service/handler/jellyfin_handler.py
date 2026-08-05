@@ -5,7 +5,7 @@ from api_service.services.jellyfin.jellyfin_client import JellyfinClient
 from api_service.db.database_manager import DatabaseManager
 
 class JellyfinHandler(BaseMediaHandler):
-    def __init__(self, jellyfin_client:JellyfinClient, seer_client, tmdb_client, logger, max_similar_movie, max_similar_tv, selected_users, library_anime_map=None, use_llm=None, request_delay=0, honor_seer_discovery=False, seer_discovered_ids=None, dry_run=False, max_total_requests=None, trakt_augmentor=None, max_content=10):
+    def __init__(self, jellyfin_client:JellyfinClient, seer_client, tmdb_client, logger, max_similar_movie, max_similar_tv, selected_users, library_anime_map=None, use_llm=None, request_delay=0, honor_seer_discovery=False, seer_discovered_ids=None, dry_run=False, max_total_requests=None, trakt_augmentor=None, max_content=10, secondary_content_sets=None):
         """
         Initialize JellyfinHandler with clients and parameters.
         :param jellyfin_client: Jellyfin API client
@@ -21,6 +21,7 @@ class JellyfinHandler(BaseMediaHandler):
         :param dry_run: If True, simulate requests without touching download clients.
         :param max_total_requests: Max number of items to request for the whole run.
         :param max_content: Max seeds to process after merging Trakt + Jellyfin sources.
+        :param secondary_content_sets: TMDB ID sets from an optional secondary media server.
         """
         super().__init__(
             seer_client=seer_client,
@@ -37,11 +38,13 @@ class JellyfinHandler(BaseMediaHandler):
             max_total_requests=max_total_requests,
             trakt_augmentor=trakt_augmentor,
             max_content=max_content,
+            secondary_content_sets=secondary_content_sets,
         )
         self.jellyfin_client = jellyfin_client
         self.selected_users = selected_users
         self.processed_series = set()
         self._populate_existing_content_sets()
+        self.merge_extra_content_sets(self.secondary_content_sets)
     
     def _populate_existing_content_sets(self):
         """Extract existing content from Jellyfin client."""

@@ -4,7 +4,6 @@ AI Search blueprint — semantic movie/TV search powered by LLM + TMDB.
 
 import asyncio
 
-import aiohttp
 from flask import Blueprint, jsonify, request
 
 from api_service.auth.limiter import limiter
@@ -13,6 +12,12 @@ from api_service.db.database_manager import DatabaseManager
 from api_service.services.ai_search.ai_search_service import AiSearchService
 from api_service.services.config_service import ConfigService
 from api_service.services.llm.llm_service import get_llm_client
+from api_service.services.seer.seer_config import (
+    get_seer_target_config,
+    is_secondary_seer_configured,
+    normalize_seer_target,
+    submit_direct_seer_request,
+)
 
 ai_search_bp = Blueprint("ai_search", __name__)
 logger = LoggerManager.get_logger("AiSearchRoute")
@@ -106,6 +111,7 @@ async def ai_search_request():
         search_query (str): The original natural-language query used for this search.
         metadata (dict): Full item metadata dict (title, poster_path, overview,
             release_date, rating, …) returned by the search endpoint.
+        seer_target (str): ``primary`` or ``secondary`` Seer instance to submit to.
 
     Returns:
         JSON response with 'status' and 'message'.
@@ -117,8 +123,7 @@ async def ai_search_request():
         rationale = data.get("rationale") or None
         search_query = (data.get("search_query") or "").strip() or None
         metadata = data.get("metadata") or {}
-        # Prefer the original search query as the stored rationale so the
-        # "AI Requests" tab can show what the user was looking for.
+        seer_target = normalize_seer_target(data.get("seer_target"))
         db_rationale = search_query or rationale
 
         if not tmdb_id:
@@ -127,81 +132,34 @@ async def ai_search_request():
             return jsonify({"status": "error", "message": "media_type must be 'movie' or 'tv'"}), 400
 
         config = ConfigService.get_runtime_config()
-        seer_url = (config.get("SEER_API_URL") or "").rstrip("/")
-        seer_token = config.get("SEER_TOKEN", "")
-        seer_session = config.get("SEER_SESSION_TOKEN", "")
-
-        if not seer_url or not seer_token:
+        if seer_target == "secondary" and not is_secondary_seer_configured(config):
+            return jsonify({
+                "status": "error",
+                "message": "Secondary Seer is not configured.",
+            }), 400
+        if get_seer_target_config(config, seer_target) is None:
             return jsonify({
                 "status": "error",
                 "message": "Seer is not configured.",
             }), 400
 
-        # Build Seer request payload
-        req_payload = {"mediaType": media_type, "mediaId": int(tmdb_id)}
-        if media_type == "tv":
-            num_seasons = config.get("FILTER_NUM_SEASONS", "all")
-            req_payload["tvdbId"] = int(tmdb_id)
-            first_season_only = config.get("REQUEST_FIRST_SEASON_ONLY", False)
-            first_season_only = (
-                first_season_only if isinstance(first_season_only, bool)
-                else str(first_season_only).strip().lower() in {"1", "true", "yes", "on"}
+        success = await submit_direct_seer_request(
+            config, seer_target, media_type, int(tmdb_id),
+        )
+        if success:
+            db = DatabaseManager()
+            media_dict = {"id": str(tmdb_id)}
+            media_dict.update(metadata)
+            db.save_metadata(media_dict, media_type)
+            db.save_request(
+                media_type, str(tmdb_id), "ai_search", None, rationale=db_rationale
             )
-            if first_season_only:
-                req_payload["seasons"] = [1]
-            elif num_seasons in (None, "", "all", 0, "0"):
-                req_payload["seasons"] = "all"
-            else:
-                req_payload["seasons"] = list(range(1, int(num_seasons) + 1))
+            return jsonify({"status": "success", "message": "Request submitted successfully."}), 200
 
-        # A stored Seer session can be valid but belong to a user without request
-        # permission. Retry once with the configured technical API key in that case.
-        auth_attempts = []
-        if seer_session:
-            auth_attempts.append(("session", {"connect.sid": seer_session}))
-        auth_attempts.append(("API key", {}))
-
-        url = f"{seer_url}/api/v1/request"
-        for auth_name, cookies in auth_attempts:
-            headers = {"Content-Type": "application/json", "accept": "application/json"}
-            if auth_name == "API key":
-                headers["X-Api-Key"] = seer_token
-
-            async with aiohttp.ClientSession(headers=headers, cookies=cookies) as session:
-                async with session.post(url, json=req_payload, timeout=10) as response:
-                    if response.status == 403 and auth_name == "session":
-                        logger.warning("Seer session cannot submit requests; retrying with API key")
-                        continue
-
-                    if response.status in (200, 201, 202):
-                        db = DatabaseManager()
-                        # Persist metadata using data supplied by the frontend so the
-                        # title and poster are stored correctly in the local DB.
-                        media_dict = {"id": str(tmdb_id)}
-                        media_dict.update(metadata)
-                        db.save_metadata(media_dict, media_type)
-                        # Tag with 'ai_search' source to keep these requests out of the
-                        # "By Watched Content" view in the dashboard.
-                        db.save_request(
-                            media_type, str(tmdb_id), "ai_search", None, rationale=db_rationale
-                        )
-                        return jsonify({"status": "success", "message": "Request submitted successfully."}), 200
-
-                    if response.status == 409:
-                        return jsonify({
-                            "status": "error",
-                            "message": "Already requested or already available.",
-                        }), 409
-
-                    resp_text = await response.text()
-                    logger.error(
-                        "Seer request failed: status=%d, body=%s",
-                        response.status, resp_text[:200],
-                    )
-                    return jsonify({
-                        "status": "error",
-                        "message": f"Seer returned status {response.status}.",
-                    }), 500
+        return jsonify({
+            "status": "error",
+            "message": "Already requested or already available.",
+        }), 409
 
     except Exception as exc:
         logger.error("Error during AI search request: %s", str(exc))

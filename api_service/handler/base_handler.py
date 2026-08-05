@@ -28,7 +28,7 @@ class BaseMediaHandler(ABC):
                  max_similar_movie, max_similar_tv, library_anime_map=None,
                  use_llm=None, request_delay=0, honor_seer_discovery=False,
                  seer_discovered_ids=None, dry_run=False, max_total_requests=None,
-                 trakt_augmentor=None, max_content=10):
+                 trakt_augmentor=None, max_content=10, secondary_content_sets=None):
         """
         Initialize base media handler.
         
@@ -48,6 +48,9 @@ class BaseMediaHandler(ABC):
             trakt_augmentor: Optional MediaUserTraktAugmentor used to add Trakt
                 watch-history seeds and merge fully-watched IDs into the skip set
             max_content: Max seeds to process after merging server + Trakt sources
+            secondary_content_sets: Optional media-type keyed TMDB ID sets from a
+                secondary media server, merged into the skip set so content
+                already available there is never requested
         """
         self.seer_client = seer_client
         self.tmdb_client = tmdb_client
@@ -60,6 +63,7 @@ class BaseMediaHandler(ABC):
         # Optimization: Pre-process existing_content into sets for O(1) lookups
         # Subclass must call _populate_existing_content_sets() after initialization
         self.existing_content_sets = {}
+        self.secondary_content_sets = secondary_content_sets or {}
         
         self.library_anime_map = library_anime_map or {}
         self.request_delay = request_delay
@@ -210,6 +214,25 @@ class BaseMediaHandler(ABC):
             "preference_signal": seed.get("preference_signal", "recent_watch"),
             "source_origin": seed.get("source_origin"),
         }
+
+    def merge_extra_content_sets(self, extra):
+        """Union additional media-type keyed TMDB ID sets into the skip set.
+
+        Used to fold a secondary media server's library into the content that is
+        considered already owned. Subclasses call this right after
+        ``_populate_existing_content_sets()``.
+        """
+        merged = 0
+        for media_type, ids in (extra or {}).items():
+            if not ids:
+                continue
+            self.existing_content_sets.setdefault(media_type, set()).update(ids)
+            merged += len(ids)
+        if merged:
+            self.logger.info(
+                "Merged %d TMDB IDs from the secondary media server into the skip set.",
+                merged,
+            )
 
     @abstractmethod
     def _populate_existing_content_sets(self):
