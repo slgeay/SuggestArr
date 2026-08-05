@@ -21,7 +21,32 @@
     <div v-else class="requests-grid">
       <article v-for="item in items" :key="item.id" class="request-card card card--column card--interactive card--padding-none" :class="{ 'card--selected': selected.includes(item.id) }" tabindex="0" @click="openItem(item)" @keydown.enter="openItem(item)">
         <label v-if="bulkMode" class="workflow-checkbox tabs-checkboxes" @click.stop><input v-model="selected" type="checkbox" :value="item.id" /><span class="sr-only">Select {{ item.title }}</span></label>
-        <div class="request-card-poster"><img v-if="item.poster_path" :src="`https://image.tmdb.org/t/p/w342${item.poster_path}`" :alt="item.title" class="poster-image" /><div v-else class="poster-placeholder"><i class="fas fa-image"></i></div><div v-if="!bulkMode && item.status === 'awaiting_approval'" class="poster-actions"><template v-if="hasDualSeerConfig"><button v-for="target in seerTargets" :key="target.id" type="button" class="poster-action poster-action--approve" :disabled="actionLoading" :aria-label="`Approve on ${target.label}`" :title="`Approve (${target.label})`" @click.stop="decideOne('approve', item.id, target.id)"><i class="fas fa-check"></i></button></template><button v-else type="button" class="poster-action poster-action--approve" :disabled="actionLoading" aria-label="Approve request" title="Approve" @click.stop="decideOne('approve', item.id)"><i class="fas fa-check"></i></button><button type="button" class="poster-action poster-action--reject" :disabled="actionLoading" aria-label="Reject request" title="Reject" @click.stop="confirmSingle('reject', item.id)"><i class="fas fa-times"></i></button></div><div v-else-if="!bulkMode && item.status === 'failed'" class="poster-actions"><button type="button" class="poster-action poster-action--retry" :disabled="actionLoading" aria-label="Retry request" title="Retry" @click.stop="confirmRetry(item)"><i class="fas fa-redo"></i></button></div><div v-else-if="!bulkMode && (item.status === 'rejected' || item.status === 'blacklisted')" class="poster-actions"><button type="button" class="poster-action poster-action--retry" :disabled="actionLoading" aria-label="Request again" title="Request again" @click.stop="confirmRequestAgain(item)"><i class="fas fa-paper-plane"></i></button></div></div>
+        <div class="request-card-poster"><img v-if="item.poster_path" :src="`https://image.tmdb.org/t/p/w342${item.poster_path}`" :alt="item.title" class="poster-image" /><div v-else class="poster-placeholder"><i class="fas fa-image"></i></div>        <div v-if="!bulkMode && item.status === 'awaiting_approval'" class="poster-actions" :class="{ 'poster-actions--dual-seer': hasDualSeerConfig }">
+          <template v-if="hasDualSeerConfig">
+            <button
+              v-for="(target, index) in seerTargets"
+              :key="target.id"
+              type="button"
+              class="poster-action poster-action--approve poster-action--labeled"
+              :disabled="actionLoading"
+              :aria-label="`Approve on ${target.label}`"
+              :title="`Approve on ${target.label}`"
+              @click.stop="decideOne('approve', item.id, target.id)"
+            >
+              <span class="poster-action-label">{{ index + 1 }}</span>
+            </button>
+          </template>
+          <button
+            v-else
+            type="button"
+            class="poster-action poster-action--approve"
+            :disabled="actionLoading"
+            aria-label="Approve request"
+            title="Approve"
+            @click.stop="decideOne('approve', item.id)"
+          ><i class="fas fa-check"></i></button>
+          <button type="button" class="poster-action poster-action--reject" :disabled="actionLoading" aria-label="Reject request" title="Reject" @click.stop="confirmSingle('reject', item.id)"><i class="fas fa-times"></i></button>
+        </div><div v-else-if="!bulkMode && item.status === 'failed'" class="poster-actions"><button type="button" class="poster-action poster-action--retry" :disabled="actionLoading" aria-label="Retry request" title="Retry" @click.stop="confirmRetry(item)"><i class="fas fa-redo"></i></button></div><div v-else-if="!bulkMode && (item.status === 'rejected' || item.status === 'blacklisted')" class="poster-actions"><button type="button" class="poster-action poster-action--retry" :disabled="actionLoading" aria-label="Request again" title="Request again" @click.stop="confirmRequestAgain(item)"><i class="fas fa-paper-plane"></i></button></div></div>
         <div class="request-card-body"><h3 class="request-card-title">{{ item.title || `TMDb ${item.tmdb_id}` }}</h3><div class="badge-container"><span class="badge badge-media">{{ item.media_type.toUpperCase() }}</span><span class="badge badge-rating"><i class="fas fa-star"></i> {{ formatRating(item.rating) }}</span><span class="badge badge-requested">{{ statusLabel(item.status) }}</span></div><div class="source-link"><span>From: <strong>{{ item.name }}</strong></span></div><div v-if="item.user_name || item.media_user_id" class="source-link"><i class="fas fa-user"></i><span>For: <strong>{{ item.user_name || item.media_user_id }}</strong></span></div><small v-if="item.status === 'failed'">{{ item.last_error || `Failed after ${item.retry_count} attempts` }}</small></div>
       </article>
     </div>
@@ -172,7 +197,7 @@ export default {
 .request-workflow{margin-top:var(--spacing-lg)}.request-card{position:relative}.request-card.card--selected{border:2px solid var(--color-text-primary);box-shadow:var(--shadow-lg)}.request-card small{display:block;color:var(--color-text-secondary)}
 .workflow-checkbox{position:absolute;top:var(--spacing-sm);left:var(--spacing-sm);z-index:2}
 .bulk-action{color:var(--color-text-primary)}.bulk-action--approve{background:var(--color-success)}.bulk-action--reject{background:var(--color-error)}.bulk-action--blacklist{background:var(--color-warning)}.bulk-action--retry{background:var(--color-primary)}
-.poster-actions{position:absolute;right:var(--spacing-sm);bottom:var(--spacing-sm);display:flex;gap:var(--spacing-sm);z-index:2}.poster-action{display:grid;place-items:center;width:var(--btn-height-md);height:var(--btn-height-md);border:1px solid var(--color-border-medium);border-radius:var(--radius-full);color:var(--color-text-primary);cursor:pointer;box-shadow:var(--shadow-md);transition:var(--transition-base)}.poster-action:hover:not(:disabled){transform:translateY(calc(var(--spacing-2xs) * -1));box-shadow:var(--shadow-lg)}.poster-action--approve{background:var(--color-success)}.poster-action--reject{background:var(--color-error)}.poster-action--retry{background:var(--color-primary)}.poster-action:disabled{opacity:0.5;cursor:not-allowed}
+.poster-actions{position:absolute;right:var(--spacing-sm);bottom:var(--spacing-sm);display:flex;gap:var(--spacing-sm);z-index:2;align-items:flex-end}.poster-actions--dual-seer{flex-direction:column;align-items:stretch;max-width:calc(100% - var(--spacing-md))}.poster-action{display:grid;place-items:center;width:var(--btn-height-md);height:var(--btn-height-md);border:1px solid var(--color-border-medium);border-radius:var(--radius-full);color:var(--color-text-primary);cursor:pointer;box-shadow:var(--shadow-md);transition:var(--transition-base)}.poster-action--labeled{width:auto;min-width:var(--btn-height-md);min-height:var(--btn-height-md);padding:0 var(--spacing-xs);border-radius:var(--radius-md);display:inline-flex;flex-direction:row;align-items:center;justify-content:center;font-size:var(--font-size-sm);font-weight:var(--font-weight-bold);white-space:nowrap}.poster-action-label{line-height:1;min-width:1ch;text-align:center}.poster-action:hover:not(:disabled){transform:translateY(calc(var(--spacing-2xs) * -1));box-shadow:var(--shadow-lg)}.poster-action--approve{background:var(--color-success)}.poster-action--reject{background:var(--color-error)}.poster-action--retry{background:var(--color-primary)}.poster-action:disabled{opacity:0.5;cursor:not-allowed}
 .workflow-confirm-message{display:flex;align-items:center;gap:var(--spacing-md);padding:var(--spacing-md);background:var(--color-error-alpha-10);border:1px solid var(--color-error-alpha-20);border-radius:var(--radius-md)}
 .workflow-confirm-message>i{display:grid;place-items:center;flex:0 0 var(--btn-height-md);height:var(--btn-height-md);border-radius:var(--radius-full);background:var(--color-error-alpha-20);color:var(--color-error-light)}
 .workflow-confirm-message p{margin:0;color:var(--color-text-primary);line-height:var(--line-height-relaxed)}

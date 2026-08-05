@@ -104,19 +104,22 @@
               <span class="badge-media-compact">
                 <i :class="request.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i>
               </span>
-              <div v-if="request._pending" class="pending-card-actions" @click.stop>
+              <div v-if="request._pending" class="pending-card-actions" :class="{ 'pending-card-actions--dual-seer': hasDualSeerConfig }" @click.stop>
                 <template v-if="confirmRejectId === request.id"><button type="button" class="poster-action pending-cancel" aria-label="Cancel rejection" @click="confirmRejectId = null"><i class="fas fa-undo"></i></button><button type="button" class="poster-action pending-reject" :disabled="actionLoadingId === request.id" aria-label="Confirm rejection" @click="decidePending('reject', request.id)"><i class="fas fa-check"></i></button></template>
                 <template v-else>
                   <template v-if="hasDualSeerConfig">
                     <button
-                      v-for="target in seerTargets"
+                      v-for="(target, index) in seerTargets"
                       :key="target.id"
                       type="button"
-                      class="poster-action pending-approve"
+                      class="poster-action pending-approve poster-action--labeled"
                       :disabled="actionLoadingId === request.id"
                       :aria-label="`Approve on ${target.label}`"
+                      :title="`Approve on ${target.label}`"
                       @click="decidePending('approve', request.id, target.id)"
-                    ><i class="fas fa-check"></i></button>
+                    >
+                      <span class="poster-action-label">{{ index + 1 }}</span>
+                    </button>
                   </template>
                   <button v-else type="button" class="poster-action pending-approve" :disabled="actionLoadingId === request.id" aria-label="Approve request" @click="decidePending('approve', request.id)"><i class="fas fa-check"></i></button>
                   <button type="button" class="poster-action pending-reject" :disabled="actionLoadingId === request.id" aria-label="Reject request" @click="confirmRejectId = request.id"><i class="fas fa-times"></i></button>
@@ -385,8 +388,11 @@ export default {
 
 .requests-stats-header.has-approval { grid-template-columns: repeat(5, 1fr); }
 
-.pending-card-actions { position: absolute; right: var(--spacing-sm); bottom: var(--spacing-sm); display: flex; gap: var(--spacing-sm); z-index: 3; }
+.pending-card-actions { position: absolute; right: var(--spacing-sm); bottom: var(--spacing-sm); display: flex; gap: var(--spacing-sm); z-index: 3; align-items: flex-end; }
+.pending-card-actions--dual-seer { flex-direction: column; align-items: stretch; max-width: calc(100% - var(--spacing-md)); }
 .poster-action { display: grid; place-items: center; width: var(--btn-height-md); height: var(--btn-height-md); padding: 0; border: 1px solid var(--color-border-medium); border-radius: var(--radius-full); color: var(--color-text-primary); cursor: pointer; box-shadow: var(--shadow-md); }
+.poster-action--labeled { width: auto; min-width: var(--btn-height-md); min-height: var(--btn-height-md); padding: 0 var(--spacing-xs); border-radius: var(--radius-md); display: inline-flex; flex-direction: row; align-items: center; justify-content: center; font-size: var(--font-size-sm); font-weight: var(--font-weight-bold); white-space: nowrap; }
+.poster-action-label { line-height: 1; min-width: 1ch; text-align: center; }
 .pending-approve { color: var(--color-text-primary); background: var(--color-success); }
 .pending-reject { color: var(--color-text-primary); background: var(--color-error); }
 .pending-cancel { background: var(--surface-elevated-solid); }
