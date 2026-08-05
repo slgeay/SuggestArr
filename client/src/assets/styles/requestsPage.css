@@ -910,6 +910,76 @@
   color: var(--color-primary);
 }
 
+/* Modal source card ("similar to" watched item) */
+.modal-source-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background-color: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+}
+
+.modal-source-poster {
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 3.75rem;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+}
+
+.modal-source-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.modal-source-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+}
+
+.modal-source-title {
+  font-size: 0.95rem;
+  color: var(--color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Modal external links (TMDb / Seerr) */
+.modal-external-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.modal-external-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-decoration: none;
+  background-color: var(--color-bg-interactive);
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-sm);
+  transition: var(--transition-base);
+}
+
+.modal-external-link:hover {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
 /* Filters Section */
 .btn.workflow-bulk-toggle {
   padding: 0.925rem 1.25rem;

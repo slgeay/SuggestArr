@@ -4,10 +4,12 @@ from unittest.mock import patch
 from api_service.db import database_manager as dm_mod
 from api_service.db.database_manager import DatabaseManager
 from api_service.services.request_sources import (
+    AI_SEARCH_SOURCE,
     DISCOVER_SOURCE,
     TRAKT_RECOMMENDATIONS_SOURCE,
     is_tmdb_metadata_source_id,
     request_source_title_sql,
+    resolve_request_source_label,
 )
 
 
@@ -16,6 +18,21 @@ def test_trakt_source_is_not_metadata_id():
     assert is_tmdb_metadata_source_id(DISCOVER_SOURCE) is False
     assert is_tmdb_metadata_source_id("27205") is True
     assert is_tmdb_metadata_source_id("ai_search") is False
+
+
+def test_resolve_request_source_label_covers_every_source_kind():
+    assert resolve_request_source_label("27205", "Inception") == "Inception"
+    assert resolve_request_source_label(DISCOVER_SOURCE) == "Discover"
+    assert resolve_request_source_label(TRAKT_RECOMMENDATIONS_SOURCE) == "Trakt Recommendations"
+    assert resolve_request_source_label(AI_SEARCH_SOURCE) == "AI Search"
+    # LLM fallback sentinel, unknown TMDb id without metadata, and no source.
+    assert resolve_request_source_label(0) == "LLM Recommendation"
+    assert resolve_request_source_label("27205") == "LLM Recommendation"
+    assert resolve_request_source_label(None) == "LLM Recommendation"
+
+
+def test_resolve_request_source_label_matches_sql_fallback():
+    assert f"ELSE '{resolve_request_source_label(None)}'" in request_source_title_sql("r")
 
 
 def test_request_source_title_sql_includes_trakt_label():
@@ -108,6 +125,42 @@ def test_pending_requests_filter_by_requested_for_user(tmp_path):
     DatabaseManager._instance = None
     assert total == 1
     assert items[0]["media_user_id"] == "plex-1"
+
+
+def test_pending_requests_resolve_source_from_payload(tmp_path):
+    """The watched item a suggestion came from lives in the queued payload and
+    must be resolved for the approval UI."""
+    db_file = str(tmp_path / "requests.db")
+    with (
+        patch.object(dm_mod, "DB_PATH", db_file),
+        patch("api_service.db.database_manager.load_env_vars", return_value={"DB_TYPE": "sqlite"}),
+    ):
+        DatabaseManager._instance = None
+        db = DatabaseManager()
+        db.save_metadata(
+            {"id": "27205", "title": "Inception", "poster_path": "/inception.jpg"}, "movie"
+        )
+        db.enqueue_request(
+            "101", "movie", None,
+            {"_source_id": 27205, "_rationale": "Shared cerebral energy."},
+            status="awaiting_approval",
+        )
+        db.enqueue_request(
+            "102", "movie", None,
+            {"_source_id": DISCOVER_SOURCE},
+            status="awaiting_approval",
+        )
+
+        items, _total = db.list_suggestions()
+
+    DatabaseManager._instance = None
+
+    by_tmdb_id = {item["tmdb_id"]: item for item in items}
+    assert by_tmdb_id["101"]["source_title"] == "Inception"
+    assert by_tmdb_id["101"]["source_poster_path"] == "/inception.jpg"
+    assert by_tmdb_id["101"]["rationale"] == "Shared cerebral energy."
+    assert by_tmdb_id["102"]["source_title"] == "Discover"
+    assert by_tmdb_id["102"]["source_poster_path"] is None
 
 
 def test_save_user_without_name_falls_back_to_id(tmp_path):
